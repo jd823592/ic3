@@ -9,6 +9,6 @@ report (Left cex) = putStrLn $ show cex
 report (Right inv) = putStrLn $ show inv
 
 main :: IO ()
-main = report $ ic3 (TransitionSystem b b b) Solver where
+main = ic3 (TransitionSystem b b b) Solver >>= report where
         b :: Formula
         b = Variable 0

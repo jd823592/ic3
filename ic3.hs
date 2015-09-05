@@ -30,8 +30,8 @@ type Result = Either Counterexample Invariant
 -- it attempts to decide whether the system is safe.
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
-ic3 :: TransitionSystem -> Solver -> Result
-ic3 ts s = evalState ic3' env where
+ic3 :: TransitionSystem -> Solver -> IO Result
+ic3 ts s = evalStateT ic3' env where
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
@@ -41,7 +41,7 @@ ic3 ts s = evalState ic3' env where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3' :: State Env Result
+    ic3' :: StateT Env IO Result
     ic3' = init >> loop' (loop'' (bad >>= block) >> prop)
 
     -- Initial environment
@@ -49,33 +49,39 @@ ic3 ts s = evalState ic3' env where
     env = Env ts s []
 
     -- Initial step
-    init :: State Env ()
+    init :: StateT Env IO ()
     init = do
         pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
-    bad :: MonadTrans t => ExceptT () (t (State Env)) Cube
+    bad :: MonadTrans t => ExceptT () (t (StateT Env IO)) Cube
     bad = mapExceptT lift $ do
-        -- return []
-        throwE () -- there is none
+        line <- lift $ lift getLine
+        if length line == 0
+        then return []
+        else throwE () -- there is none
 
     -- Try recursively blocking the bad cube
     -- May fail to block
     -- Then if the cex is real, it is returned
     -- Otherwise the abstraction is refined
-    block :: Cube -> ExceptT () (ExceptT Counterexample (State Env)) ()
+    block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env IO)) ()
     block c = lift $ do
-        return () -- if blocked or abs refined
-        -- throwE $ Counterexample [] -- real error
+        line <- lift $ lift getLine
+        if length line == 0
+        then return () -- blocked or abs refined
+        else throwE $ Counterexample [] -- real error
 
     -- Propagate blocked cubes to higher frames
-    prop :: MonadTrans t => ExceptT Invariant (t (State Env)) ()
+    prop :: MonadTrans t => ExceptT Invariant (t (StateT Env IO)) ()
     prop = mapExceptT lift $ do
-        -- return ()
-        throwE $ Invariant [] -- fixpoint
+        line <- lift $ lift getLine
+        if length line == 0
+        then return () -- no fixpoint yet
+        else throwE $ Invariant [] -- fixpoint
 
     -- Push a new frame
-    pushNewFrame :: State Env ()
+    pushNewFrame :: StateT Env IO ()
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) (getSolver env) ([] : getFrames env)
