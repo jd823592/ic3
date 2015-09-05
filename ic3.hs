@@ -2,6 +2,7 @@
 module IC3 where
 
 import Control.Monad
+import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
@@ -56,7 +57,7 @@ ic3 ts s = evalStateT ic3' env where
     -- Find a predecessor of an error state if one exists.
     bad :: MonadTrans t => ExceptT () (t (StateT Env IO)) Cube
     bad = mapExceptT lift $ do
-        line <- lift $ lift getLine
+        line <- liftIO getLine
         if length line == 0
         then return []
         else throwE () -- there is none
@@ -67,7 +68,7 @@ ic3 ts s = evalStateT ic3' env where
     -- Otherwise the abstraction is refined
     block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env IO)) ()
     block c = lift $ do
-        line <- lift $ lift getLine
+        line <- liftIO getLine
         if length line == 0
         then return () -- blocked or abs refined
         else throwE $ Counterexample [] -- real error
@@ -75,7 +76,7 @@ ic3 ts s = evalStateT ic3' env where
     -- Propagate blocked cubes to higher frames
     prop :: MonadTrans t => ExceptT Invariant (t (StateT Env IO)) ()
     prop = mapExceptT lift $ do
-        line <- lift $ lift getLine
+        line <- liftIO getLine
         if length line == 0
         then return () -- no fixpoint yet
         else throwE $ Invariant [] -- fixpoint
