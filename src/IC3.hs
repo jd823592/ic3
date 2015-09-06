@@ -8,8 +8,9 @@ import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
 
 import Logic
-import Solver
 import TransitionSystem
+
+import qualified Z3.Monad as Z3
 
 -- Cube is a conjunction of literals
 -- Frame consists of blocked cubes
@@ -19,7 +20,7 @@ type Frames = [Frame]
 
 type Step = Int
 
-data Env = Env { getTransitionSystem :: TransitionSystem, getSolver :: Solver, getFrames :: Frames }
+data Env = Env { getTransitionSystem :: TransitionSystem, getFrames :: Frames }
 
 data Counterexample = Counterexample [Step] deriving Show
 data Invariant = Invariant Frame deriving Show
@@ -31,8 +32,8 @@ type Result = Either Counterexample Invariant
 -- it attempts to decide whether the system is safe.
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
-ic3 :: TransitionSystem -> Solver -> IO Result
-ic3 ts s = evalStateT ic3' env where
+ic3 :: TransitionSystem -> IO Result
+ic3 ts = evalStateT ic3' env where
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
@@ -47,7 +48,7 @@ ic3 ts s = evalStateT ic3' env where
 
     -- Initial environment
     env :: Env
-    env = Env ts s []
+    env = Env ts []
 
     -- Initial step
     init :: StateT Env IO ()
@@ -57,10 +58,11 @@ ic3 ts s = evalStateT ic3' env where
     -- Find a predecessor of an error state if one exists.
     bad :: MonadTrans t => ExceptT () (t (StateT Env IO)) Cube
     bad = mapExceptT lift $ do
-        line <- liftIO getLine
-        if length line == 0
-        then return []
-        else throwE () -- there is none
+        r <- liftIO $ Z3.evalZ3 Z3.check
+        case r of
+		Z3.Sat -> return []
+		Z3.Unsat -> throwE () -- there is none
+		otherwise -> error "Z3 failed to check for bad state"
 
     -- Try recursively blocking the bad cube
     -- May fail to block
@@ -68,24 +70,23 @@ ic3 ts s = evalStateT ic3' env where
     -- Otherwise the abstraction is refined
     block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env IO)) ()
     block c = lift $ do
-        line <- liftIO getLine
-        if length line == 0
-        then return () -- blocked or abs refined
-        else throwE $ Counterexample [] -- real error
+        r <- liftIO $ Z3.evalZ3 Z3.check
+        case r of
+		Z3.Sat -> return () -- blocked or abs refined
+		Z3.Unsat -> throwE $ Counterexample [] -- real error
+		otherwise -> error "Z3 failed to check if bad state is blocked / refine abstraction"
 
     -- Propagate blocked cubes to higher frames
     prop :: MonadTrans t => ExceptT Invariant (t (StateT Env IO)) ()
     prop = mapExceptT lift $ do
-        line <- liftIO getLine
-        if length line == 0
-        then return () -- no fixpoint yet
-        else throwE $ Invariant [] -- fixpoint
+        return () -- no fixpoint yet
+        --throwE $ Invariant [] -- fixpoint
 
     -- Push a new frame
     pushNewFrame :: StateT Env IO ()
     pushNewFrame = do
         env <- get
-        put $ Env (getTransitionSystem env) (getSolver env) ([] : getFrames env)
+        put $ Env (getTransitionSystem env) ([] : getFrames env)
 
     -- Auxiliary functions
     loop :: Monad m => ExceptT r m () -> m r

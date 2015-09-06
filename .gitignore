@@ -1,3 +1,6 @@
 **
 !.gitignore
-!*.hs
+!ic3.cabal
+!LICENSE
+!src
+!src/*.hs
