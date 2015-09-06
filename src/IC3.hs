@@ -1,5 +1,5 @@
 -- IC3 with implicit predicate abstraction
-module IC3 where
+module IC3 (ic3, Result, Counterexample, Invariant) where
 
 import Control.Monad
 import Control.Monad.IO.Class
@@ -33,7 +33,7 @@ type Result = Either Counterexample Invariant
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
 ic3 :: TransitionSystem -> IO Result
-ic3 ts = evalStateT ic3' env where
+ic3 ts = Z3.evalZ3 $ evalStateT ic3' env where
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
@@ -43,7 +43,7 @@ ic3 ts = evalStateT ic3' env where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3' :: StateT Env IO Result
+    ic3' :: Z3.MonadZ3 z3 => StateT Env z3 Result
     ic3' = init >> loop' (loop'' (bad >>= block) >> prop)
 
     -- Initial environment
@@ -51,39 +51,55 @@ ic3 ts = evalStateT ic3' env where
     env = Env ts []
 
     -- Initial step
-    init :: StateT Env IO ()
+    init :: Z3.MonadZ3 z3 => StateT Env z3 ()
     init = do
         pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
-    bad :: MonadTrans t => ExceptT () (t (StateT Env IO)) Cube
+    bad :: (MonadTrans t, Z3.MonadZ3 z3) => ExceptT () (t (StateT Env z3)) Cube
     bad = mapExceptT lift $ do
-        r <- liftIO $ Z3.evalZ3 Z3.check
+        s <- lift get
+
+        let ts = getTransitionSystem s
+        let fs = getFrames s
+        let f  = head $ getFrames s
+        let t  = getTrans ts
+        let p  = getProp ts
+
+        lift $ lift Z3.push
+
+        lift pushNewFrame -- utter nonsense, just debugging
+
+        r <- return $ if length fs == 5 then Z3.Unsat else Z3.Sat -- lift $ lift Z3.check
+
+        lift $ lift $ Z3.pop 1
+
         case r of
-		Z3.Sat -> return []
-		Z3.Unsat -> throwE () -- there is none
-		otherwise -> error "Z3 failed to check for bad state"
+            Z3.Sat -> return []
+            Z3.Unsat -> throwE () -- there is none
+            otherwise -> error "Z3 failed to check for bad state"
 
     -- Try recursively blocking the bad cube
     -- May fail to block
     -- Then if the cex is real, it is returned
     -- Otherwise the abstraction is refined
-    block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env IO)) ()
+    block :: Z3.MonadZ3 z3 => Cube -> ExceptT () (ExceptT Counterexample (StateT Env z3)) ()
     block c = lift $ do
-        r <- liftIO $ Z3.evalZ3 Z3.check
+        r <- lift $ lift Z3.check
         case r of
-		Z3.Sat -> return () -- blocked or abs refined
-		Z3.Unsat -> throwE $ Counterexample [] -- real error
-		otherwise -> error "Z3 failed to check if bad state is blocked / refine abstraction"
+            Z3.Sat -> return () -- blocked or abs refined
+            Z3.Unsat -> throwE $ Counterexample [] -- real error
+            otherwise -> error "Z3 failed to check if bad state is blocked / refine abstraction"
 
     -- Propagate blocked cubes to higher frames
-    prop :: MonadTrans t => ExceptT Invariant (t (StateT Env IO)) ()
+    prop :: (MonadTrans t, Z3.MonadZ3 z3) => ExceptT Invariant (t (StateT Env z3)) ()
     prop = mapExceptT lift $ do
-        return () -- no fixpoint yet
-        --throwE $ Invariant [] -- fixpoint
+        --return () -- no fixpoint yet
+        fs <- fmap getFrames $ lift get -- debugging
+        throwE $ Invariant $ replicate (1 + length fs) [Pos $ Var 3] -- fixpoint
 
     -- Push a new frame
-    pushNewFrame :: StateT Env IO ()
+    pushNewFrame :: Z3.MonadZ3 z3 => StateT Env z3 ()
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) ([] : getFrames env)
