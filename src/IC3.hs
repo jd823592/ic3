@@ -70,7 +70,11 @@ ic3 ts = Z3.evalZ3 $ evalStateT ic3' env where
 
         lift pushNewFrame -- utter nonsense, just debugging
 
-        r <- return $ if length fs == 5 then Z3.Unsat else Z3.Sat -- lift $ lift Z3.check
+        if length fs == 5
+        then lift $ lift $ Z3.mkFalse >>= Z3.solverAssertCnstr
+        else return ()
+
+        r <- lift $ lift Z3.check
 
         lift $ lift $ Z3.pop 1
 
