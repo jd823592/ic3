@@ -29,7 +29,7 @@
 --
 -- Thus pi and pi' inherit values depending on the actual queries.
 --
-module IC3 (ic3, Proof, Counterexample, Invariant) where
+module IC3 (ic3, Proof) where
 
 import Control.Monad
 import Control.Monad.IO.Class
@@ -45,7 +45,7 @@ import Z3.Monad
 
 -- Cube is a conjunction of literals
 -- Frame consists of blocked cubes
-type Cube = [Lit]
+type Cube = [Expr]
 type Frame = [Cube]
 type Frames = [Frame]
 
@@ -86,12 +86,33 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
     init :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) ()
     init = do
         lift $ do
-            lift $ do
-                t <- tM
-                n <- nM
-                assert =<< mkImplies t =<< mkTrue -- assert t => trans
-                assert =<< mkImplies n =<< mkNot =<< mkFalse -- assert n => not p'
+            s <- get
+
+            let ts = getTransitionSystem s
+            let i  = getInit  ts
+            let t  = getTrans ts
+            let p  = getProp  ts
+
             pushNewFrame
+
+            lift $ do
+                tl <- tM
+                nl <- nM
+
+                -- assert init and not p
+                m <- modelTemp $ do
+                    assert =<< toZ3 i
+                    assert =<< mkNot =<< toZ3 p
+
+                assert =<< mkImplies nl =<< mkNot =<< toZ3 p -- assert n => not p' -- Next
+                assert =<< mkImplies tl =<< toZ3 t           -- assert t => trans
+
+                return m
+
+        >>= \r -> case r of
+            (Sat, Just m) -> throwE $ Counterexample [] -- init intersects error states
+            (Unsat, _) -> return () -- there is no intersection between init and error states
+            otherwise -> error "failed to check init"
 
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
@@ -115,7 +136,7 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
         >>= \r -> case r of
             (Sat, Just m) -> return [] -- bad cube found
             (Unsat, _) -> throwE () -- there is none
-            otherwise -> error "failed to check for bad state"
+            otherwise -> error "failed to check bad state"
 
     -- Activation variable for the initial states
     iM :: MonadZ3 z3 => z3 AST

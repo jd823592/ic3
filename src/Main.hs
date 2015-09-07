@@ -8,6 +8,12 @@ report (Left cex) = putStrLn $ show cex
 report (Right inv) = putStrLn $ show inv
 
 main :: IO ()
-main = ic3 (TransitionSystem b b b) >>= report where
-        b :: Formula
-        b = Variable 0
+main = ic3 (TransitionSystem i t p) >>= report where
+        i :: Expr
+        i = Var BoolSort 0
+
+        t :: Expr
+        t = Var BoolSort 0
+
+        p :: Expr
+        p = Var BoolSort 0
