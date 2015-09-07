@@ -64,7 +64,7 @@ type Proof = Either Counterexample Invariant
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
 ic3 :: TransitionSystem -> IO Proof
-ic3 ts = evalZ3 $ evalStateT ic3' env where
+ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
@@ -74,8 +74,8 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3' :: MonadZ3 z3 => StateT Env z3 Proof
-    ic3' = init >> loop' (loop'' (bad >>= block) >> prop)
+    ic3' :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) Invariant
+    ic3' = init >> loop (loop' (bad >>= block) >> prop)
 
     -- Initial environment
     env :: Env
@@ -83,14 +83,15 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
 
     -- Initial step
     -- Declare the transition relation and the property
-    init :: MonadZ3 z3 => StateT Env z3 ()
+    init :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) ()
     init = do
         lift $ do
-            t <- tM
-            n <- nM
-            assert =<< mkImplies t =<< mkTrue -- assert t => trans
-            assert =<< mkImplies n =<< mkNot =<< mkFalse -- assert n => not p'
-        pushNewFrame
+            lift $ do
+                t <- tM
+                n <- nM
+                assert =<< mkImplies t =<< mkTrue -- assert t => trans
+                assert =<< mkImplies n =<< mkNot =<< mkFalse -- assert n => not p'
+            pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
@@ -112,7 +113,7 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
                 when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
 
         >>= \r -> case r of
-            (Sat, Just m) -> return []
+            (Sat, Just m) -> return [] -- bad cube found
             (Unsat, _) -> throwE () -- there is none
             otherwise -> error "failed to check for bad state"
 
@@ -162,14 +163,11 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
         put $ Env (getTransitionSystem env) ([] : getFrames env)
 
     -- Auxiliary functions
-    loop :: Monad m => ExceptT r m () -> m r
+    loop :: Monad m => ExceptT a m b -> m a
     loop = liftM (either id id) . runExceptT . forever
 
-    loop' :: Monad m => ExceptT a (ExceptT e m) () -> m (Either e a)
-    loop' = runExceptT . loop
-
-    loop'' :: (MonadTrans t, Monad m) => ExceptT r m () -> t m r
-    loop'' = lift . loop
+    loop' :: Monad m => ExceptT () m () -> ExceptT Invariant m ()
+    loop' = lift . loop
 
     temp :: MonadZ3 z3 => z3 a -> z3 () -> z3 a
     temp a b = push >> b >> a >>= \r -> pop 1 >> return r
