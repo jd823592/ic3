@@ -4,8 +4,8 @@ import Logic
 import TransitionSystem
 
 report :: Proof -> IO ()
-report (Left cex) = putStrLn $ show cex
-report (Right inv) = putStrLn $ show inv
+report (Left cex) = putStrLn $ "Unsafe: " ++ show cex
+report (Right inv) = putStrLn $ "Safe: " ++ show inv
 
 main :: IO ()
 main = ic3 (TransitionSystem i t p) >>= report where
