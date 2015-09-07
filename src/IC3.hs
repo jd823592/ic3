@@ -1,4 +1,34 @@
 -- IC3 with implicit predicate abstraction
+--
+-- Iteratively computes sets of states reachable in 0, 1, ... k steps (via a transition relation)
+-- starting in the initial set of states. Tries to prove that the desired property holds in all
+-- executions by showing unreachability of a state that violates the property.
+--
+-- Invariants of the IC3 algorithm:
+--   F0 = I
+--   Fi => Fi+1             -- moreover, as Fi are sets of blocked cubes, Fi+1 is subset of Fi
+--   Fi and T implies Fi+1'
+--   Fi => P
+--
+-- Because Fi are ordered by subset relation, each cube c is remembered only in the highest Fk where it is blocked.
+-- Thus the true Fi will be represented in fact with: Fi and Fi+1 and Fi+2 and ...
+--
+-- Most of the transition system is immutable (initial states, transition relation, property).
+-- These are precise and need no refinement, therefore, they are added into the solver context once at the beginning.
+--
+--   i => I
+--   t => T
+--   n => not P'
+--
+-- Whenever a spurious error is encountered (due to a too coarse abstraction).
+-- The counterexample trace is interpolated and new predicates are extracted from the interpolants.
+-- Each new predicate is assigned two new fresh variables pi, pi' and the following is asserted.
+--
+--   pi  <=> Predi
+--   pi' <=> Predi'
+--
+-- Thus pi and pi' inherit values depending on the actual queries.
+--
 module IC3 (ic3, Proof, Counterexample, Invariant) where
 
 import Control.Monad
@@ -6,6 +36,7 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
+import qualified Data.Traversable as T
 
 import Logic
 import TransitionSystem
@@ -50,14 +81,6 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
     env :: Env
     env = Env ts []
 
-    -- Activation variable for the transition relation
-    tM :: MonadZ3 z3 => z3 AST
-    tM = mkFreshBoolVar "t"
-
-    -- Activation variable for the negated property
-    nM :: MonadZ3 z3 => z3 AST
-    nM = mkFreshBoolVar "n"
-
     -- Initial step
     -- Declare the transition relation and the property
     init :: MonadZ3 z3 => StateT Env z3 ()
@@ -65,11 +88,13 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
         lift $ do
             t <- tM
             n <- nM
-            assert =<< mkIff t =<< mkTrue -- assert t iff trans
-            assert =<< mkIff n =<< mkNot =<< mkFalse -- assert n iff not p
+            assert =<< mkImplies t =<< mkTrue -- assert t => trans
+            assert =<< mkImplies n =<< mkNot =<< mkFalse -- assert n => not p'
         pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
+    -- Find a model of all pi under the assumption Fi and T and not P'.
+    -- These are the assignments to the abstraction predicates in the pre-state.
     bad :: (MonadTrans t, MonadZ3 z3) => ExceptT () (t (StateT Env z3)) Cube
     bad = mapExceptT lift $ do
         lift $ do
@@ -82,17 +107,32 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
             let t        = getTrans ts
             let p        = getProp ts
 
-            lift $ modelTemp $ when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
+            lift $ modelTemp $ do
+                assert =<< mkAnd =<< T.sequence [ tM, nM ]
+                when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
 
         >>= \r -> case r of
             (Sat, Just m) -> return []
             (Unsat, _) -> throwE () -- there is none
             otherwise -> error "failed to check for bad state"
 
-    -- Try recursively blocking the bad cube
-    -- May fail to block
-    -- Then if the cex is real, it is returned
-    -- Otherwise the abstraction is refined
+    -- Activation variable for the initial states
+    iM :: MonadZ3 z3 => z3 AST
+    iM = mkFreshBoolVar "i"
+
+    -- Activation variable for the transition relation
+    tM :: MonadZ3 z3 => z3 AST
+    tM = mkFreshBoolVar "t"
+
+    -- Activation variable for the negated property
+    nM :: MonadZ3 z3 => z3 AST
+    nM = mkFreshBoolVar "n"
+
+    -- Try recursively blocking the bad cube (error predecessor state).
+    -- (1) Blocking fails due to reaching F0 with a proof obligation.
+    --   (a) Then if the cex is real, it is returned.
+    --   (b) Otherwise the abstraction is refined.
+    -- (2) Blocking succeeds.
     block :: MonadZ3 z3 => Cube -> ExceptT () (ExceptT Counterexample (StateT Env z3)) ()
     block c = lift $ do
         r <- lift $ lift check
@@ -101,7 +141,13 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
             Unsat -> throwE $ Counterexample [] -- real error
             otherwise -> error "failed to check if bad state is blocked / refine abstraction"
 
-    -- Propagate blocked cubes to higher frames
+    -- Propagate blocked cubes to higher frames.
+    -- If the constraint corresponding to a blocked cube is inductive with respect to the current frame,
+    -- we can move it to the next frame.
+    -- (1) If in the end the last two frames are equal (i.e. Fn-1 is empty) then we cannot discover anything
+    --     more in the next iteration and thus we have encountered a fixpoint and we can terminate.
+    --     Because Fn holds in the prefix and all hypothetical successors it is an invariant of the system.
+    -- (2) Else we continue.
     prop :: (MonadTrans t, MonadZ3 z3) => ExceptT Invariant (t (StateT Env z3)) ()
     prop = mapExceptT lift $ do
         lift pushNewFrame
