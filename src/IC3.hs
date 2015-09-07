@@ -50,44 +50,43 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
     env :: Env
     env = Env ts []
 
+    -- Activation variable for the transition relation
+    tM :: MonadZ3 z3 => z3 AST
+    tM = mkFreshBoolVar "t"
+
+    -- Activation variable for the negated property
+    nM :: MonadZ3 z3 => z3 AST
+    nM = mkFreshBoolVar "n"
+
     -- Initial step
-    -- Create new variables
-    --   t = activation variable for transition relation
-    --   n = activation variable for negated property
+    -- Declare the transition relation and the property
     init :: MonadZ3 z3 => StateT Env z3 ()
     init = do
-        t <- lift $ mkFreshBoolVar "t"
-        n <- lift $ mkFreshBoolVar "n"
-        lift $ assert =<< mkIff t =<< mkTrue -- assert t iff trans
-        lift $ assert =<< mkIff n =<< mkTrue -- assert n iff not p
+        lift $ do
+            t <- tM
+            n <- nM
+            assert =<< mkIff t =<< mkTrue -- assert t iff trans
+            assert =<< mkIff n =<< mkNot =<< mkFalse -- assert n iff not p
         pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
     bad :: (MonadTrans t, MonadZ3 z3) => ExceptT () (t (StateT Env z3)) Cube
     bad = mapExceptT lift $ do
-        s <- lift get
+        lift $ do
+            s <- get
 
-        let ts = getTransitionSystem s
-        let fs = getFrames s
-        let f  = head $ getFrames s
-        let t  = getTrans ts
-        let p  = getProp ts
+            pushNewFrame -- utter nonsense, just debugging
 
-        lift $ lift push
+            let ts       = getTransitionSystem s
+            let fs@(f:_) = getFrames s
+            let t        = getTrans ts
+            let p        = getProp ts
 
-        lift pushNewFrame -- utter nonsense, just debugging
+            lift $ modelTemp $ when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
 
-        if length fs == 5
-        then lift $ lift $ mkFalse >>= assert
-        else return ()
-
-        r <- lift $ lift check
-
-        lift $ lift $ pop 1
-
-        case r of
-            Sat -> return []
-            Unsat -> throwE () -- there is none
+        >>= \r -> case r of
+            (Sat, Just m) -> return []
+            (Unsat, _) -> throwE () -- there is none
             otherwise -> error "failed to check for bad state"
 
     -- Try recursively blocking the bad cube
@@ -105,9 +104,10 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
     -- Propagate blocked cubes to higher frames
     prop :: (MonadTrans t, MonadZ3 z3) => ExceptT Invariant (t (StateT Env z3)) ()
     prop = mapExceptT lift $ do
+        lift pushNewFrame
         --return () -- no fixpoint yet
         fs <- fmap getFrames $ lift get -- debugging
-        throwE $ Invariant $ replicate (1 + length fs) [Pos $ Var 3] -- fixpoint
+        throwE $ Invariant $ replicate (length fs) [] -- fixpoint
 
     -- Push a new frame
     pushNewFrame :: MonadZ3 z3 => StateT Env z3 ()
@@ -124,3 +124,12 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
 
     loop'' :: (MonadTrans t, Monad m) => ExceptT r m () -> t m r
     loop'' = lift . loop
+
+    temp :: MonadZ3 z3 => z3 a -> z3 () -> z3 a
+    temp a b = push >> b >> a >>= \r -> pop 1 >> return r
+
+    checkTemp :: MonadZ3 z3 => z3 () -> z3 Result
+    checkTemp = temp check
+
+    modelTemp :: MonadZ3 z3 => z3 () -> z3 (Result, Maybe Model)
+    modelTemp = temp getModel
