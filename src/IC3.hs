@@ -51,8 +51,15 @@ ic3 ts = evalZ3 $ evalStateT ic3' env where
     env = Env ts []
 
     -- Initial step
+    -- Create new variables
+    --   t = activation variable for transition relation
+    --   n = activation variable for negated property
     init :: MonadZ3 z3 => StateT Env z3 ()
     init = do
+        t <- lift $ mkFreshBoolVar "t"
+        n <- lift $ mkFreshBoolVar "n"
+        lift $ assert =<< mkIff t =<< mkTrue -- assert t iff trans
+        lift $ assert =<< mkIff n =<< mkTrue -- assert n iff not p
         pushNewFrame
 
     -- Find a predecessor of an error state if one exists.
