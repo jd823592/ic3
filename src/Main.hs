@@ -3,7 +3,7 @@ import IC3
 import Logic
 import TransitionSystem
 
-report :: Result -> IO ()
+report :: Proof -> IO ()
 report (Left cex) = putStrLn $ show cex
 report (Right inv) = putStrLn $ show inv
 
