@@ -100,9 +100,10 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
                 nl <- nM
 
                 -- assert init and not p
-                m <- modelTemp $ do
+                m <- temp $ do
                     assert =<< toZ3 i
                     assert =<< mkNot =<< toZ3 p
+                    getModel
 
                 assert =<< mkImplies nl =<< mkNot =<< toZ3 p -- assert n => not p' -- Next
                 assert =<< mkImplies tl =<< toZ3 t           -- assert t => trans
@@ -129,9 +130,10 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
             let t        = getTrans ts
             let p        = getProp ts
 
-            lift $ modelTemp $ do
+            lift $ temp $ do
                 assert =<< mkAnd =<< T.sequence [ tM, nM ]
                 when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
+                getModel
 
         >>= \r -> case r of
             (Sat, Just m) -> return [] -- bad cube found
@@ -190,11 +192,5 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
     loop' :: Monad m => ExceptT () m () -> ExceptT Invariant m ()
     loop' = lift . loop
 
-    temp :: MonadZ3 z3 => z3 a -> z3 () -> z3 a
-    temp a b = push >> b >> a >>= \r -> pop 1 >> return r
-
-    checkTemp :: MonadZ3 z3 => z3 () -> z3 Result
-    checkTemp = temp check
-
-    modelTemp :: MonadZ3 z3 => z3 () -> z3 (Result, Maybe Model)
-    modelTemp = temp getModel
+    temp :: MonadZ3 z3 => z3 a -> z3 a
+    temp a = push >> a >>= \r -> pop 1 >> return r
