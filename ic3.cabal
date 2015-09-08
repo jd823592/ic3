@@ -3,7 +3,7 @@
 
 name:                ic3
 version:             0.1.0.0
--- synopsis:            
+synopsis:            An implementation of IC3 verification algorithm wih Implicit Abstraction
 -- description:         
 homepage:            http://github.com/jd823592/ic3
 license:             OtherLicense
