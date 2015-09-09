@@ -27,8 +27,9 @@
 --
 -- The algorithm has found a fixpoint when Fi = Fi+1 at the end of some major iteration.
 -- In that case Fi and T => Fi, in other words Fi is an invariant:
---   a) Initiation: I = F0 => F1 => ... Fi, i.e. I => Fi
---   b) Consecution: Fi and T => Fi+1' = Fi, i.e. Fi and T => Fi'
+--   a)  Initiation: I = F0 => F1 => ... Fi, i.e. I => Fi
+--   b)  Consecution: Fi and T => Fi+1' = Fi, i.e. Fi and T => Fi'
+--   b') Strengthened consecution: Fi and P and T => Fi'
 -- In our encoding the check whether Fi = Fi+1 reduces to checking emptiness of Fi.
 -- If Fi is a superset of Fi+1, but contains no blocked cube on top of what Fi+1 does.
 --
