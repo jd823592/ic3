@@ -105,7 +105,7 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
                     assert =<< mkNot =<< toZ3 p
                     getModel
 
-                assert =<< mkImplies nl =<< mkNot =<< toZ3 p -- assert n => not p' -- Next
+                assert =<< mkImplies nl =<< mkNot =<< toZ3 p -- assert n => not p'
                 assert =<< mkImplies tl =<< toZ3 t           -- assert t => trans
 
                 return m
