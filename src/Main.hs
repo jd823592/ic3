@@ -7,8 +7,13 @@ report :: Proof -> IO ()
 report (Left cex) = putStrLn $ "Unsafe: " ++ show cex
 report (Right inv) = putStrLn $ "Safe: " ++ show inv
 
+enum :: [a] -> [a]
+enum = take 1
+--enum = take 10
+--enum = id
+
 main :: IO ()
-main = ic3 (TransitionSystem i t p) >>= report where
+main = ic3 (TransitionSystem i t p) >>= mapM_ report where
         i :: Expr
         i = Var BoolSort 0
 
@@ -16,4 +21,4 @@ main = ic3 (TransitionSystem i t p) >>= report where
         t = Var BoolSort 0
 
         p :: Expr
-        p = Var BoolSort 0
+        p = Var BoolSort 1

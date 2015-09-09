@@ -87,8 +87,20 @@ type Proof = Either Counterexample Invariant
 -- it attempts to decide whether the system is safe.
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
-ic3 :: TransitionSystem -> IO Proof
-ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
+ic3 :: TransitionSystem -> IO [Proof]
+ic3 ts = ic3' env where
+
+    -- Restart the IC3 after every counterexample is found.
+    -- By keeping the work that IC3 has done so far, and
+    -- blocking the latest counterexample, we can countinue
+    -- until an invariant is found, thus enumerating multiple
+    -- counterexamples.
+    ic3' :: Env -> IO [Proof]
+    ic3' env = do
+        (p, env') <- evalZ3 . (`runStateT` env) . runExceptT $ ic3''
+        case p of
+            cex@(Left  _) -> ic3' env' >>= return . (cex :)
+            inv@(Right _) -> return [inv]
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
@@ -98,8 +110,8 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3' :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) Invariant
-    ic3' = init >> loop (loop' (bad >>= block) >> prop)
+    ic3'' :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) Invariant
+    ic3'' = init >> loop (loop' (bad >>= block) >> prop)
 
     -- Initial environment
     env :: Env
@@ -186,7 +198,10 @@ ic3 ts = evalZ3 . (`evalStateT` env) . runExceptT $ ic3' where
         r <- lift $ lift check
         case r of
             Sat -> return () -- blocked or abs refined
-            Unsat -> throwE $ Counterexample [] -- real error
+            Unsat -> do
+                -- We will report this error, however we can exclude the cube incident with the initial states.
+                -- That allows us to continue searching for other errors if we like.
+                throwE $ Counterexample [] -- real error
             otherwise -> error "failed to check if bad state is blocked / refine abstraction"
 
     -- Propagate blocked cubes to higher frames.
