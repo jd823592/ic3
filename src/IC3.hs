@@ -55,6 +55,7 @@
 --
 module IC3 (ic3, Proof) where
 
+import System.IO.Unsafe (unsafeInterleaveIO)
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
@@ -99,7 +100,7 @@ ic3 ts = ic3' env where
     ic3' env = do
         (p, env') <- evalZ3 . (`runStateT` env) . runExceptT $ ic3''
         case p of
-            cex@(Left  _) -> ic3' env' >>= return . (cex :)
+            cex@(Left  _) -> unsafeInterleaveIO (ic3' env') >>= return . (cex :)
             inv@(Right _) -> return [inv]
 
     -- Perform the IC3
