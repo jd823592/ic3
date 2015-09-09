@@ -6,12 +6,35 @@
 --
 -- Invariants of the IC3 algorithm:
 --   F0 = I
---   Fi => Fi+1             -- moreover, as Fi are sets of blocked cubes, Fi+1 is subset of Fi
+--   Fi => Fi+1             -- moreover, as Fi are sets of blocked cubes, Fi+1 is subset of Fi. This can be checked syntactically.
 --   Fi and T implies Fi+1'
 --   Fi => P
 --
 -- Because Fi are ordered by subset relation, each cube c is remembered only in the highest Fk where it is blocked.
 -- Thus the true Fi will be represented in fact with: Fi and Fi+1 and Fi+2 and ...
+--
+-- The algorithm proceeds as follows:
+--   1) Get a predecessor of an error state
+--     a) if there is none, proceed to 3
+--   2) Recursively block the predecessor
+--     a) Fails to block
+--        i) The error is real, report it - program unsafe.
+--       ii) The error is spurious, refine abstraction, go to 1
+--     b) Succeeds to block, go to 1
+--   3) Propagate blocked cubes to the highest frame Fk possible (as long as the cube is inductive with respect to the frame)
+--     a) Fixpoint found, report invariant - program safe.
+--     b) Otherwise go to 1
+--
+-- The algorithm has found a fixpoint when Fi = Fi+1 at the end of some major iteration.
+-- In that case Fi and T => Fi, in other words Fi is an invariant:
+--   a) Initiation: I = F0 => F1 => ... Fi, i.e. I => Fi
+--   b) Consecution: Fi and T => Fi+1' = Fi, i.e. Fi and T => Fi'
+-- In our encoding the check whether Fi = Fi+1 reduces to checking emptiness of Fi.
+-- If Fi is a superset of Fi+1, but contains no blocked cube on top of what Fi+1 does.
+--
+-- Whenever a cube is being blocked, it is first generalized.
+--
+-- Refinement is achieved with interpolation of a spurious counterexample trace formula.
 --
 -- Most of the transition system is immutable (initial states, transition relation, property).
 -- These are precise and need no refinement, therefore, they are added into the solver context once at the beginning.
