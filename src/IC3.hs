@@ -91,7 +91,7 @@ type Proof = Either Counterexample Invariant
 ic3 :: TransitionSystem -> IO [Proof]
 ic3 ts = ic3' env where
 
-    -- Restart the IC3 after every counterexample is found.
+    -- Restart the IC3 after a counterexample is found.
     -- By keeping the work that IC3 has done so far, and
     -- blocking the latest counterexample, we can countinue
     -- until an invariant is found, thus enumerating multiple
@@ -130,6 +130,8 @@ ic3 ts = ic3' env where
             let t  = getTrans ts
             let p  = getProp  ts
 
+            -- reset the solver
+            -- and do other cleanup necessary to allow reexecution with remembered env
             pushNewFrame
 
             lift $ do
