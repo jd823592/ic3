@@ -7,11 +7,11 @@ data Result = Safe | Unsafe deriving Show
 
 report :: [Proof] -> IO ()
 report [] = error "no result"
-report xs = report' 1 Safe xs where
-    report' :: Int -> Result -> [Proof] -> IO ()
-    report' _ r [] = putStrLn $ show r
-    report' n r (Left  cex : xs) = putStrLn ("cex " ++ show n ++ ": " ++ show cex) >> report' (n + 1) Unsafe xs
-    report' n r (Right inv : xs) = putStrLn ("inv: " ++ show inv)
+report xs = report' Safe $ zip [1..] xs where
+    report' :: Result -> [(Int, Proof)] -> IO ()
+    report' r [] = putStrLn $ show r
+    report' r ((n, Left  cex) : xs) = putStrLn ("cex " ++ show n ++ ": " ++ show cex) >> report' Unsafe xs
+    report' r ((_, Right inv) : xs) = putStrLn ("inv: " ++ show inv)
 
 enum :: [a] -> [a]
 --enum = take 1
