@@ -19,12 +19,9 @@ enum = take 10
 --enum = id
 
 main :: IO ()
-main = ic3 (TransitionSystem i t p) >>= report . enum where
-        i :: Expr
-        i = Var BoolSort 0
+main = do
+    putStrLn "Please, enter i t p:"
 
-        t :: Expr
-        t = Var BoolSort 0
+    [i, t, p] <- fmap (map (Var BoolSort . read) . words) getLine
 
-        p :: Expr
-        p = Var BoolSort 1
+    ic3 (TransitionSystem i t p) >>= report . enum where

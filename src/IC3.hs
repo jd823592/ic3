@@ -116,7 +116,7 @@ ic3 ts = ic3' env where
 
     -- Initial environment
     env :: Env
-    env = Env ts []
+    env = Env ts [[]]
 
     -- Initial step
     -- Declare the transition relation and the property
@@ -130,11 +130,10 @@ ic3 ts = ic3' env where
             let t  = getTrans ts
             let p  = getProp  ts
 
-            -- reset the solver
-            -- and do other cleanup necessary to allow reexecution with remembered env
-            pushNewFrame
-
             lift $ do
+                -- reset the solver
+                -- and do other cleanup necessary to allow reexecution with remembered env
+
                 tl <- tM
                 nl <- nM
 
@@ -162,7 +161,7 @@ ic3 ts = ic3' env where
         lift $ do
             s <- get
 
-            pushNewFrame -- utter nonsense, just debugging
+            pushNewFrame -- utter nonsense, just debugging, to make this loop stop
 
             let ts       = getTransitionSystem s
             let fs@(f:_) = getFrames s
@@ -179,32 +178,28 @@ ic3 ts = ic3' env where
             (Unsat, _) -> throwE () -- there is none
             otherwise -> error "failed to check bad state"
 
-    -- Activation variable for the initial states
-    iM :: MonadZ3 z3 => z3 AST
-    iM = mkFreshBoolVar "i"
-
-    -- Activation variable for the transition relation
-    tM :: MonadZ3 z3 => z3 AST
-    tM = mkFreshBoolVar "t"
-
-    -- Activation variable for the negated property
-    nM :: MonadZ3 z3 => z3 AST
-    nM = mkFreshBoolVar "n"
-
     -- Try recursively blocking the bad cube (error predecessor state).
     -- (1) Blocking fails due to reaching F0 with a proof obligation.
     --   (a) Then if the cex is real, it is returned.
     --   (b) Otherwise the abstraction is refined.
     -- (2) Blocking succeeds.
     block :: MonadZ3 z3 => Cube -> ExceptT () (ExceptT Counterexample (StateT Env z3)) ()
-    block c = lift $ do
-        r <- lift $ lift check
+    block c = lift $ lift (fmap getFrames get) >>= block' c
+
+    block' :: MonadZ3 z3 => Cube -> [Frame] -> ExceptT Counterexample (StateT Env z3) ()
+    block' c (f:fs) = do
+        r <- lift . lift $ check -- extract counterexample to induction (CTI)
         case r of
             Sat -> return () -- blocked or abs refined
-            Unsat -> do
-                -- We will report this error, however we can exclude the cube incident with the initial states.
-                -- That allows us to continue searching for other errors if we like.
-                throwE $ Counterexample [] -- real error
+            Unsat -> if length fs == 0
+                then do
+                    -- We will report this error, however we can exclude this counterexample.
+                    -- That allows us to continue searching for other errors if we like.
+                    -- It is important we exclude as little as possible to be able to enumerate all the counterexamples that we can.
+                    -- Maybe blocking the original bad state in the last frame is the right choice.
+                    throwE $ Counterexample [] -- real error
+                else
+                    block' c fs -- block the counterexample to induction
             otherwise -> error "failed to check if bad state is blocked / refine abstraction"
 
     -- Propagate blocked cubes to higher frames.
@@ -221,11 +216,27 @@ ic3 ts = ic3' env where
         fs <- fmap getFrames $ lift get -- debugging
         throwE $ Invariant $ replicate (length fs) [] -- fixpoint
 
+    -- Generalise the cube to be blocked to rule out other counterexamples
+    gen :: MonadZ3 z3 => Cube -> StateT Env z3 Cube
+    gen = return
+
     -- Push a new frame
     pushNewFrame :: MonadZ3 z3 => StateT Env z3 ()
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) ([] : getFrames env)
+
+    -- Activation variable for the initial states
+    iM :: MonadZ3 z3 => z3 AST
+    iM = mkFreshBoolVar "i"
+
+    -- Activation variable for the transition relation
+    tM :: MonadZ3 z3 => z3 AST
+    tM = mkFreshBoolVar "t"
+
+    -- Activation variable for the negated property
+    nM :: MonadZ3 z3 => z3 AST
+    nM = mkFreshBoolVar "n"
 
     -- Auxiliary functions
     loop :: Monad m => ExceptT a m b -> m a
