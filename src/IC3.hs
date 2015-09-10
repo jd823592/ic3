@@ -213,9 +213,16 @@ ic3 ts = ic3' env where
     prop :: (MonadTrans t, MonadZ3 z3) => ExceptT Invariant (t (StateT Env z3)) ()
     prop = mapExceptT lift $ do
         lift pushNewFrame
-        --return () -- no fixpoint yet
-        fs <- fmap getFrames $ lift get -- debugging
-        throwE $ Invariant $ replicate (length fs) [] -- fixpoint
+
+        fs@(f : f' : _) <- fmap getFrames $ lift get
+
+        -- TODO: propagate
+
+        -- set
+
+        if length f' == 0
+        then throwE $ Invariant f -- fixpoint: f and f' contain the same blocked clauses and thus are equal
+        else return ()            -- no fixpoint yet
 
     -- Generalise the cube to be blocked to rule out other counterexamples
     gen :: MonadZ3 z3 => Cube -> StateT Env z3 Cube
