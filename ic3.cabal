@@ -21,6 +21,7 @@ executable ic3
   other-modules:       IC3, Logic, TransitionSystem
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.7,
+                       list-t >= 0.4.5,
                        transformers >= 0.4.3.0,
                        z3 >= 4.1.0
   hs-source-dirs:      src

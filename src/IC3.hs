@@ -62,6 +62,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
 import qualified Data.Traversable as T
+import qualified ListT as L
 
 import Logic
 import TransitionSystem
@@ -88,7 +89,7 @@ type Proof = Either Counterexample Invariant
 -- it attempts to decide whether the system is safe.
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
-ic3 :: TransitionSystem -> IO [Proof]
+ic3 :: TransitionSystem -> L.ListT IO Proof
 ic3 ts = ic3' env where
 
     -- Restart the IC3 after a counterexample is found.
@@ -96,12 +97,12 @@ ic3 ts = ic3' env where
     -- blocking the latest counterexample, we can countinue
     -- until an invariant is found, thus enumerating multiple
     -- counterexamples.
-    ic3' :: Env -> IO [Proof]
+    ic3' :: Env -> L.ListT IO Proof
     ic3' env = do
-        (p, env') <- evalZ3 . (`runStateT` env) . runExceptT $ ic3''
+        (p, env') <- lift . evalZ3 . (`runStateT` env) . runExceptT $ ic3''
         case p of
-            cex@(Left  _) -> unsafeInterleaveIO (ic3' env') >>= return . (cex :)
-            inv@(Right _) -> return [inv]
+            cex@(Left  _) -> L.cons cex (ic3' env')
+            inv@(Right _) -> return inv
 
     -- Perform the IC3
     -- Detect reachability of an error state in one step via `bad` state.
