@@ -188,6 +188,7 @@ ic3 ts = ic3' env where
 
     block' :: MonadZ3 z3 => Cube -> [Frame] -> ExceptT Counterexample (StateT Env z3) ()
     block' c (f:fs) = do
+        -- TODO: loop while there are predecessors
         r <- lift . lift $ check -- extract counterexample to induction (CTI)
         case r of
             Sat -> return () -- blocked or abs refined
