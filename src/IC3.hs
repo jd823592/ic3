@@ -191,13 +191,16 @@ ic3 ts = ic3' env where
         -- TODO: loop while there are predecessors
         r <- lift . lift $ check -- extract counterexample to induction (CTI)
         case r of
-            Sat -> return () -- blocked or abs refined
+            Sat -> return () -- blocked
             Unsat -> if length fs == 0
                 then do
-                    -- We will report this error, however we can exclude this counterexample.
-                    -- That allows us to continue searching for other errors if we like.
-                    -- It is important we exclude as little as possible to be able to enumerate all the counterexamples that we can.
-                    -- Maybe blocking the original bad state in the last frame is the right choice.
+                    -- Run BMC to validate the counterexample feasibility
+
+                    -- If infeasible, refine
+                    -- return () -- refined
+
+                    -- If actual error, block it and report it.
+                    -- This allows us to search for further counterexamples.
                     throwE $ Counterexample [] -- real error
                 else
                     block' c fs -- block the counterexample to induction
