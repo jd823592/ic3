@@ -1,19 +1,29 @@
 import IC3
 
-import Logic
 import TransitionSystem
 
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State
 import qualified ListT as L
 
-data Result = Safe | Unsafe deriving Show
+import Z3.Monad
+
+data Report = Safe | Unsafe deriving Show
+
+readInput :: IO [Z3 AST]
+readInput = readVars =<< getLine
+
+readVar :: String -> IO (Z3 AST)
+readVar s = return $ mkBoolVar =<< mkIntSymbol (read s)
+
+readVars :: String -> IO [Z3 AST]
+readVars s = mapM readVar (words s)
 
 report :: L.ListT IO Proof -> IO ()
 report ps = do
     L.fold report' (1, Safe) (enum ps) >>= print . snd where
 
-    report' :: (Int, Result) -> Proof -> IO (Int, Result)
+    report' :: (Int, Report) -> Proof -> IO (Int, Report)
     report' (n, _) (Left  cex) = putStrLn ("cex " ++ show n ++ ": " ++ show cex) >> return (n + 1, Unsafe)
     report' (n, r) (Right inv) = putStrLn ("inv: " ++ show inv) >> return (n, r)
 
@@ -28,7 +38,7 @@ main :: IO ()
 main = do
     putStrLn "Please, enter i t p:"
 
-    [i, t, p] <- fmap (map (Var BoolSort . read) . words) getLine
+    [i, t, p] <- readInput
 
     putStrLn ""
 

@@ -64,14 +64,17 @@ import Control.Monad.Trans.State
 import qualified Data.Traversable as T
 import qualified ListT as L
 
-import Logic
 import TransitionSystem
 
 import Z3.Monad
 
 -- Cube is a conjunction of literals
 -- Frame consists of blocked cubes
-type Cube = [Expr]
+type Cube = [Z3 AST]
+
+instance Show (Z3 a) where
+    show _ = "z3"
+
 type Frame = [Cube]
 type Frames = [Frame]
 
@@ -112,7 +115,7 @@ ic3 ts = ic3' env where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3'' :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) Invariant
+    ic3'' :: ExceptT Counterexample (StateT Env Z3) Invariant
     ic3'' = init >> loop (loop' (bad >>= block) >> prop)
 
     -- Initial environment
@@ -121,7 +124,7 @@ ic3 ts = ic3' env where
 
     -- Initial step
     -- Declare the transition relation and the property
-    init :: MonadZ3 z3 => ExceptT Counterexample (StateT Env z3) ()
+    init :: ExceptT Counterexample (StateT Env Z3) ()
     init = do
         lift $ do
             s <- get
@@ -140,12 +143,12 @@ ic3 ts = ic3' env where
 
                 -- assert init and not p
                 m <- temp $ do
-                    assert =<< toZ3 i
-                    assert =<< mkNot =<< toZ3 p
+                    assert =<< i
+                    assert =<< mkNot =<< p
                     getModel
 
-                assert =<< mkImplies nl =<< mkNot =<< toZ3 p -- assert n => not p'
-                assert =<< mkImplies tl =<< toZ3 t           -- assert t => trans
+                assert =<< mkImplies nl =<< mkNot =<< p -- assert n => not p'
+                assert =<< mkImplies tl =<< t           -- assert t => trans
 
                 return m
 
@@ -157,7 +160,7 @@ ic3 ts = ic3' env where
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
     -- These are the assignments to the abstraction predicates in the pre-state.
-    bad :: (MonadTrans t, MonadZ3 z3) => ExceptT () (t (StateT Env z3)) Cube
+    bad :: (MonadTrans t) => ExceptT () (t (StateT Env Z3)) Cube
     bad = mapExceptT lift $ do
         lift $ do
             s <- get
@@ -184,10 +187,10 @@ ic3 ts = ic3' env where
     --   (a) Then if the cex is real, it is returned.
     --   (b) Otherwise the abstraction is refined.
     -- (2) Blocking succeeds.
-    block :: MonadZ3 z3 => Cube -> ExceptT () (ExceptT Counterexample (StateT Env z3)) ()
+    block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env Z3)) ()
     block c = lift $ lift (fmap getFrames get) >>= block' c
 
-    block' :: MonadZ3 z3 => Cube -> [Frame] -> ExceptT Counterexample (StateT Env z3) ()
+    block' :: Cube -> [Frame] -> ExceptT Counterexample (StateT Env Z3) ()
     block' c (f:fs) = do
         -- TODO: loop while there are predecessors
         r <- lift . lift $ check -- extract counterexample to induction (CTI)
@@ -214,7 +217,7 @@ ic3 ts = ic3' env where
     --     more in the next iteration and thus we have encountered a fixpoint and we can terminate.
     --     Because Fn holds in the prefix and all hypothetical successors it is an invariant of the system.
     -- (2) Else we continue.
-    prop :: (MonadTrans t, MonadZ3 z3) => ExceptT Invariant (t (StateT Env z3)) ()
+    prop :: (MonadTrans t) => ExceptT Invariant (t (StateT Env Z3)) ()
     prop = mapExceptT lift $ do
         lift pushNewFrame
 
@@ -229,25 +232,25 @@ ic3 ts = ic3' env where
         else return ()            -- no fixpoint yet
 
     -- Generalise the cube to be blocked to rule out other counterexamples
-    gen :: MonadZ3 z3 => Cube -> StateT Env z3 Cube
+    gen :: Cube -> StateT Env Z3 Cube
     gen = return
 
     -- Push a new frame
-    pushNewFrame :: MonadZ3 z3 => StateT Env z3 ()
+    pushNewFrame :: StateT Env Z3 ()
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) ([] : getFrames env)
 
     -- Activation variable for the initial states
-    iM :: MonadZ3 z3 => z3 AST
+    iM :: Z3 AST
     iM = mkFreshBoolVar "i"
 
     -- Activation variable for the transition relation
-    tM :: MonadZ3 z3 => z3 AST
+    tM :: Z3 AST
     tM = mkFreshBoolVar "t"
 
     -- Activation variable for the negated property
-    nM :: MonadZ3 z3 => z3 AST
+    nM :: Z3 AST
     nM = mkFreshBoolVar "n"
 
     -- Auxiliary functions
