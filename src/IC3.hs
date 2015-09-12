@@ -61,12 +61,12 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
-import Data.List.Split
 import Debug.Trace
 
 import qualified Data.Traversable as T
 import qualified ListT as L
 
+import Logic
 import TransitionSystem
 
 import Z3.Monad
@@ -150,8 +150,11 @@ ic3 ts = ic3' env where
                     assert =<< mkNot =<< p
                     getModel
 
-                assert =<< mkImplies nl =<< mkNot =<< p -- assert n => not p'
-                assert =<< mkImplies tl =<< t           -- assert t => trans
+                d <- astToString =<< t -- debug
+                d `trace` return ()    -- debug
+
+                assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n => not p'
+                assert =<< mkImplies tl =<< t                    -- assert t => trans
 
                 return m
 
@@ -243,47 +246,6 @@ ic3 ts = ic3' env where
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) ([] : getFrames env)
-
-    time :: Int -> AST -> Z3 AST
-    time t a = do
-        k <- getAstKind a
-        case k of
-            Z3_APP_AST        -> timeApp t a
-            Z3_QUANTIFIER_AST -> timeQ   t a
-            otherwise         -> return a
-
-    timeApp :: Int -> AST -> Z3 AST
-    timeApp t a = do
-        app  <- toApp a
-        decl <- getAppDecl app
-        args <- getAppNumArgs app
-        sort <- getSort a
-        sym  <- getDeclName decl
-
-        if args == 0
-        then do
-            (name, time) <- getTimedSymbol sym
-            sym' <- timeSymbol (time + t) name
-            mkVar sym' sort
-        else
-            undefined
-
-    timeQ :: Int -> AST -> Z3 AST
-    timeQ = "timeQ" `trace` undefined
-
-    untime :: AST -> Z3 AST
-    untime a = "untime" `trace` undefined
-
-    getTimedSymbol :: Symbol -> Z3 (String, Int)
-    getTimedSymbol s = do
-        raw <- getSymbolString s
-
-        let [sym, time] = splitOn ".at" raw ++ ["0"]
-
-        return (sym, read time)
-
-    timeSymbol :: Int -> String -> Z3 Symbol
-    timeSymbol t s = mkStringSymbol $ s ++ '.' : 'a' : 't' : show t
 
     -- Activation variable for the initial states
     iM :: Z3 AST
