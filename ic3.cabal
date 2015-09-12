@@ -18,7 +18,7 @@ cabal-version:       >=1.10
 
 executable ic3
   main-is:             Main.hs
-  other-modules:       IC3, Logic, TransitionSystem
+  other-modules:       IC3, TransitionSystem
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.7,
                        list-t >= 0.4.5,
