@@ -150,8 +150,7 @@ ic3 ts = ic3' env where
                     assert =<< mkNot =<< p
                     getModel
 
-                d <- astToString =<< t -- debug
-                d `trace` return ()    -- debug
+                mapM (`trace` return ()) =<< mapM astToString =<< getPreds =<< t -- debug
 
                 assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n => not p'
                 assert =<< mkImplies tl =<< t                    -- assert t => trans

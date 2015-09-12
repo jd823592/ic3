@@ -2,6 +2,7 @@ module Logic ( time
              , untime
              , next
              , prev
+             , getPreds
              ) where
 
 import Data.List.Split
@@ -52,15 +53,31 @@ untime a = do
                 mkVar sym' sort
             else
                 mkApp decl =<< mapM untime =<< (getAppArgs app)
+
         otherwise -> return a
 
 getTimedSymbol :: Symbol -> Z3 (String, Int)
 getTimedSymbol s = do
     raw <- getSymbolString s
 
-    let [sym, time] = splitOn ".at" raw ++ ["0"]
+    let [sym, time] = splitOn "@" raw ++ ["0"]
 
     return (sym, read time)
 
 timeSymbol :: Int -> String -> Z3 Symbol
-timeSymbol t s = mkStringSymbol $ s ++ '.' : 'a' : 't' : show t
+timeSymbol t s = mkStringSymbol $ s ++ '@' : show t
+
+getPreds :: AST -> Z3 [AST]
+getPreds a = do
+    k <- getAstKind a
+    case k of
+        Z3_APP_AST -> do
+            app  <- toApp a
+            decl <- getAppDecl app
+            sym  <- getSymbolString =<< getDeclName decl
+
+            if sym `elem` ["=", "<"]
+            then return [a]
+            else fmap concat $ mapM getPreds =<< getAppArgs app
+
+        otherwise -> return []
