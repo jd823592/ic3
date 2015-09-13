@@ -61,31 +61,19 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
+import Data.List
 import Debug.Trace
 
 import qualified Data.Traversable as T
 import qualified ListT as L
 
+import Environment
 import Logic
 import TransitionSystem
 
 import Z3.Monad
 
--- Cube is a conjunction of literals
--- Frame consists of blocked cubes
-type Cube = [Z3 AST]
-
-instance Show (Z3 a) where
-    show _ = "z3"
-
-type Frame = [Cube]
-type Frames = [Frame]
-
-type Step = Int
-
-data Env = Env { getTransitionSystem :: TransitionSystem, getFrames :: Frames }
-
-data Counterexample = Counterexample [Step] deriving Show
+data Counterexample = Counterexample [Cube] deriving Show
 data Invariant = Invariant Frame deriving Show
 
 type Proof = Either Counterexample Invariant
@@ -122,8 +110,24 @@ ic3 ts = ic3' env where
     ic3'' = init >> loop (loop' (bad >>= block) >> prop)
 
     -- Initial environment
+    -- These steps are done once and they are not executed when ic3 is restarted on the same input.
+    -- Initially there is one empty frame.
+    -- The initial set of abstraction predicates is extracted from i, t, and p.
     env :: Env
-    env = Env ts [[]]
+    env = let i = getInit  ts
+              t = getTrans ts
+              p = getProp  ts
+
+              -- Extract unique predicates from i, t, and p.
+              -- Allocate a new variable for each.
+              predDefs = fmap (map head . group . sort . concat) $ T.sequence $ map (getPreds =<<) [i, t, p]
+              predVars = do
+                  n <- fmap length predDefs
+                  T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
+              preds    = do
+                  pvs <- predVars
+                  pds <- predDefs
+                  return (zip pvs pds) in Env ts [[]] preds
 
     -- Initial step
     -- Declare the transition relation and the property
@@ -136,6 +140,7 @@ ic3 ts = ic3' env where
             let i  = getInit  ts
             let t  = getTrans ts
             let p  = getProp  ts
+            let ps = getAbsPreds s
 
             lift $ do
                 -- reset the solver
@@ -150,10 +155,12 @@ ic3 ts = ic3' env where
                     assert =<< mkNot =<< p
                     getModel
 
-                mapM (`trace` return ()) =<< mapM astToString =<< getPreds =<< t -- debug
+                "Extracted predicate definitions:" `trace` return ()
+                mapM (`trace` return ()) =<< mapM astToString =<< mapM (uncurry mkIff) =<< ps -- debug
 
-                assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n => not p'
-                assert =<< mkImplies tl =<< t                    -- assert t => trans
+                assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n   => not p'
+                assert =<< mkImplies tl =<< t                    -- assert t   => trans
+                mapM assert =<< mapM (uncurry mkIff) =<< ps      -- assert pi <=> predi
 
                 return m
 
@@ -175,7 +182,8 @@ ic3 ts = ic3' env where
             let ts       = getTransitionSystem s
             let fs@(f:_) = getFrames s
             let t        = getTrans ts
-            let p        = getProp ts
+            let p        = getProp  ts
+            let ps       = getAbsPreds s
 
             lift $ temp $ do
                 assert =<< mkAnd =<< T.sequence [ tM, nM ]
@@ -183,7 +191,16 @@ ic3 ts = ic3' env where
                 getModel
 
         >>= \r -> case r of
-            (Sat, Just m) -> return [] -- bad cube found
+            (Sat, Just m) -> do
+                lift $ do
+                    s <- get
+
+                    lift $ do
+                        c <- buildCube m =<< fmap (map fst) (getAbsPreds s)
+                        ("Cube (" ++ show (length c) ++ "):") `trace` return ()
+                        mapM (`trace` return ()) =<< mapM astToString c
+                        return c
+                >>= return . return -- bad cube found
             (Unsat, _) -> throwE () -- there is none
             otherwise -> error "failed to check bad state"
 
@@ -213,7 +230,7 @@ ic3 ts = ic3' env where
                     throwE $ Counterexample [] -- real error
                 else
                     block' c fs -- block the counterexample to induction
-            otherwise -> error "failed to check if bad state is blocked / refine abstraction"
+            otherwise -> error "failed to check if bad state is blocked"
 
     -- Propagate blocked cubes to higher frames.
     -- If the constraint corresponding to a blocked cube is inductive with respect to the current frame,
@@ -240,11 +257,26 @@ ic3 ts = ic3' env where
     gen :: Cube -> StateT Env Z3 Cube
     gen = return
 
+    buildCube :: Model -> [AST] -> Z3 [AST]
+    buildCube m = foldr buildCube' (return []) where
+        buildCube' :: AST -> Z3 [AST] -> Z3 [AST]
+        buildCube' a c = do
+            ma <- modelEval m a False
+            case ma of
+                Nothing -> c
+                Just ma' -> do
+                    v <- getBool ma'
+                    if v
+                    then return . (a:) =<< c
+                    else do
+                        n <- mkNot a
+                        return . (n:) =<< c
+
     -- Push a new frame
     pushNewFrame :: StateT Env Z3 ()
     pushNewFrame = do
         env <- get
-        put $ Env (getTransitionSystem env) ([] : getFrames env)
+        put $ Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)
 
     -- Activation variable for the initial states
     iM :: Z3 AST
