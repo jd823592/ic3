@@ -257,21 +257,6 @@ ic3 ts = ic3' env where
     gen :: Cube -> StateT Env Z3 Cube
     gen = return
 
-    buildCube :: Model -> [AST] -> Z3 [AST]
-    buildCube m = foldr buildCube' (return []) where
-        buildCube' :: AST -> Z3 [AST] -> Z3 [AST]
-        buildCube' a c = do
-            ma <- modelEval m a False
-            case ma of
-                Nothing -> c
-                Just ma' -> do
-                    v <- getBool ma'
-                    if v
-                    then return . (a:) =<< c
-                    else do
-                        n <- mkNot a
-                        return . (n:) =<< c
-
     -- Push a new frame
     pushNewFrame :: StateT Env Z3 ()
     pushNewFrame = do

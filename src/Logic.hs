@@ -3,6 +3,7 @@ module Logic ( time
              , next
              , prev
              , getPreds
+             , buildCube
              ) where
 
 import Data.List.Split
@@ -81,3 +82,18 @@ getPreds a = do
             else fmap concat $ mapM getPreds =<< getAppArgs app
 
         otherwise -> return []
+
+buildCube :: Model -> [AST] -> Z3 [AST]
+buildCube m = foldr buildCube' (return []) where
+    buildCube' :: AST -> Z3 [AST] -> Z3 [AST]
+    buildCube' a c = do
+        ma <- modelEval m a False
+        case ma of
+            Nothing -> c
+            Just ma' -> do
+                v <- getBool ma'
+                if v
+                then return . (a:) =<< c
+                else do
+                    n <- mkNot a
+                    return . (n:) =<< c
