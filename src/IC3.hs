@@ -134,13 +134,13 @@ ic3 ts = ic3' env where
     init :: ExceptT Counterexample (StateT Env Z3) ()
     init = do
         lift $ do
-            s <- get
+            env <- get
 
-            let ts = getTransitionSystem s
+            let ts = getTransitionSystem env
             let i  = getInit  ts
             let t  = getTrans ts
             let p  = getProp  ts
-            let ps = getAbsPreds s
+            let ps = getAbsPreds env
 
             lift $ do
                 -- reset the solver
@@ -167,7 +167,6 @@ ic3 ts = ic3' env where
         >>= \r -> case r of
             (Sat, Just m) -> throwE $ Counterexample [] -- init intersects error states
             (Unsat, _) -> return () -- there is no intersection between init and error states
-            otherwise -> error "failed to check init"
 
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
@@ -175,15 +174,9 @@ ic3 ts = ic3' env where
     bad :: (MonadTrans t) => ExceptT () (t (StateT Env Z3)) Cube
     bad = mapExceptT lift $ do
         lift $ do
-            s <- get
+            Env {getFrames = fs@(f:_), getAbsPreds = ps} <- get
 
             pushNewFrame -- utter nonsense, just debugging, to make this loop stop
-
-            let ts       = getTransitionSystem s
-            let fs@(f:_) = getFrames s
-            let t        = getTrans ts
-            let p        = getProp  ts
-            let ps       = getAbsPreds s
 
             lift $ temp $ do
                 assert =<< mkAnd =<< T.sequence [ tM, nM ]
@@ -193,16 +186,15 @@ ic3 ts = ic3' env where
         >>= \r -> case r of
             (Sat, Just m) -> do
                 lift $ do
-                    s <- get
+                    Env {getAbsPreds = ps} <- get
 
                     lift $ do
-                        c <- buildCube m =<< fmap (map fst) (getAbsPreds s)
-                        ("Cube (" ++ show (length c) ++ "):") `trace` return ()
+                        c <- buildCube m =<< fmap (map fst) ps
+                        ("Bad cube (" ++ show (length c) ++ "):") `trace` return ()
                         mapM (`trace` return ()) =<< mapM astToString c
                         return c
                 >>= return . return -- bad cube found
             (Unsat, _) -> throwE () -- there is none
-            otherwise -> error "failed to check bad state"
 
     -- Try recursively blocking the bad cube (error predecessor state).
     -- (1) Blocking fails due to reaching F0 with a proof obligation.
@@ -217,7 +209,7 @@ ic3 ts = ic3' env where
         -- TODO: loop while there are predecessors
         r <- lift . lift $ check -- extract counterexample to induction (CTI)
         case r of
-            Sat -> return () -- blocked
+            Sat   -> return () -- blocked
             Unsat -> if length fs == 0
                 then do
                     -- Run BMC to validate the counterexample feasibility
@@ -230,7 +222,6 @@ ic3 ts = ic3' env where
                     throwE $ Counterexample [] -- real error
                 else
                     block' c fs -- block the counterexample to induction
-            otherwise -> error "failed to check if bad state is blocked"
 
     -- Propagate blocked cubes to higher frames.
     -- If the constraint corresponding to a blocked cube is inductive with respect to the current frame,
