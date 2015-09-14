@@ -78,6 +78,12 @@ data Invariant = Invariant Frame deriving Show
 
 type Proof = Either Counterexample Invariant
 
+-- convert these to newtypes and implement flattening features for the enclosed monads
+-- instantiate MonadState, MonadIO/Z3, MonadError
+-- identify other nested stacks
+type ProofState    = StateT Env Z3
+type ProofBranch a = ExceptT a ProofState
+
 -- IC3
 -- Given a transition system and a solver to use
 -- it attempts to decide whether the system is safe.
@@ -106,7 +112,7 @@ ic3 ts = ic3' env where
     --     check if the error is real (in a BMC-like style).
     --     (a) report it if so.
     --     (b) otherwise compute interpolants and refine abstraction.
-    ic3'' :: ExceptT Counterexample (StateT Env Z3) Invariant
+    ic3'' :: ProofBranch Counterexample Invariant
     ic3'' = init >> loop (loop' (bad >>= block) >> prop)
 
     -- Initial environment
@@ -131,7 +137,7 @@ ic3 ts = ic3' env where
 
     -- Initial step
     -- Declare the transition relation and the property
-    init :: ExceptT Counterexample (StateT Env Z3) ()
+    init :: ProofBranch Counterexample ()
     init = do
         lift $ do
             env <- get
@@ -171,7 +177,7 @@ ic3 ts = ic3' env where
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
     -- These are the assignments to the abstraction predicates in the pre-state.
-    bad :: (MonadTrans t) => ExceptT () (t (StateT Env Z3)) Cube
+    bad :: (MonadTrans t) => ExceptT () (t ProofState) Cube
     bad = mapExceptT lift $ do
         lift $ do
             Env {getFrames = fs@(f:_), getAbsPreds = ps} <- get
@@ -201,10 +207,10 @@ ic3 ts = ic3' env where
     --   (a) Then if the cex is real, it is returned.
     --   (b) Otherwise the abstraction is refined.
     -- (2) Blocking succeeds.
-    block :: Cube -> ExceptT () (ExceptT Counterexample (StateT Env Z3)) ()
+    block :: Cube -> ExceptT () (ProofBranch Counterexample) ()
     block c = lift $ lift (fmap getFrames get) >>= block' c
 
-    block' :: Cube -> [Frame] -> ExceptT Counterexample (StateT Env Z3) ()
+    block' :: Cube -> [Frame] -> ProofBranch Counterexample ()
     block' c (f:fs) = do
         -- TODO: loop while there are predecessors
         r <- lift . lift $ check -- extract counterexample to induction (CTI)
@@ -230,7 +236,7 @@ ic3 ts = ic3' env where
     --     more in the next iteration and thus we have encountered a fixpoint and we can terminate.
     --     Because Fn holds in the prefix and all hypothetical successors it is an invariant of the system.
     -- (2) Else we continue.
-    prop :: (MonadTrans t) => ExceptT Invariant (t (StateT Env Z3)) ()
+    prop :: (MonadTrans t) => ExceptT Invariant (t ProofState) ()
     prop = mapExceptT lift $ do
         lift pushNewFrame
 
@@ -245,11 +251,11 @@ ic3 ts = ic3' env where
         else return ()            -- no fixpoint yet
 
     -- Generalise the cube to be blocked to rule out other counterexamples
-    gen :: Cube -> StateT Env Z3 Cube
+    gen :: Cube -> ProofState Cube
     gen = return
 
     -- Push a new frame
-    pushNewFrame :: StateT Env Z3 ()
+    pushNewFrame :: ProofState ()
     pushNewFrame = do
         env <- get
         put $ Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)
