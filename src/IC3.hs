@@ -55,7 +55,6 @@
 --
 module IC3 (ic3, Proof) where
 
-import System.IO.Unsafe (unsafeInterleaveIO)
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
