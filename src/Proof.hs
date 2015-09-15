@@ -23,9 +23,7 @@ type Proof = Either Counterexample Invariant
 
 class MonadZ3 m => MonadIC3 m where
     pushNewFrame :: m ()
-
     temp :: m a -> m a
-    temp a = lift $ push >> a >>= \r -> pop 1 >> return r
 
 newtype MonadZ3 z3 => ProofStateT z3 a = ProofStateT { runProofStateT :: StateT Env z3 a }
     deriving (Functor, Applicative, Monad, MonadIO, S.MonadState Env)
@@ -57,5 +55,7 @@ instance MonadZ3 z3 => MonadIC3 (ProofStateT z3) where
         env <- ProofStateT get
         ProofStateT . put $ Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)
 
+    temp a = lift $ push >> a >>= \r -> pop 1 >> return r
+
 instance MonadZ3 z3 => MonadIC3 (ProofBranchT a z3) where
-    pushNewFrame = lift . pushNewFrame
+    pushNewFrame = lift (pushNewFrame :: ProofStateT z3 ())
