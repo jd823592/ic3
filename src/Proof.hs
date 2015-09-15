@@ -1,6 +1,19 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 
-module Proof where
+module Proof ( Counterexample(..)
+             , Invariant(..)
+             , Proof
+             , MonadIC3(..)
+             , ProofStateT
+             , ProofBranchT
+             , ProofState
+             , ProofBranch
+             , MaybeDisproof
+             , MaybeProof
+             , run
+             , get
+             , put
+             ) where
 
 import Control.Applicative
 import Control.Monad
@@ -52,8 +65,11 @@ instance MonadZ3 z3 => MonadZ3 (ProofBranchT a z3) where
 
 instance MonadZ3 z3 => MonadIC3 (ProofStateT z3) where
     pushNewFrame = ProofStateT (modify (\env -> Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)))
-
     temp a = push >> a >>= \r -> pop 1 >> return r
 
 instance MonadZ3 z3 => MonadIC3 (ProofBranchT a z3) where
     pushNewFrame = (ProofBranchT . lift) pushNewFrame
+    temp = (>>= ProofBranchT . lift . temp . return)
+
+run :: Env -> ProofBranch Counterexample Invariant -> IO (Proof, Env)
+run env = evalZ3 . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT

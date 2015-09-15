@@ -59,10 +59,8 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Error.Class
 import Control.Monad.IO.Class
-import Control.Monad.State.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
-import Control.Monad.Trans.State
 import Data.List
 import Debug.Trace
 
@@ -91,7 +89,7 @@ ic3 ts = ic3' env where
     -- counterexamples.
     ic3' :: Env -> L.ListT IO Proof
     ic3' env = do
-        (p, env') <- lift . evalZ3 . (`runStateT` env) . runExceptT . runProofBranchT $ ic3''
+        (p, env') <- lift . run $ ic3''
         case p of
             cex@(Left  _) -> L.cons cex (ic3' env')
             inv@(Right _) -> return inv
