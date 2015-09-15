@@ -1,21 +1,17 @@
-module Environment ( Cube
-                   , Frame
-                   , Frames
-                   , Env(..)
-                   ) where
+module Environment where
 
 import TransitionSystem
 
 import Z3.Monad
 
--- Cube is a conjunction of literals
--- Frame consists of blocked cubes
-type Cube = Z3 [AST]
+type Cube = [AST]
 
 instance Show (Z3 a) where
     show _ = "z3"
 
 type Frame = [Cube]
 type Frames = [Frame]
+type Predicate = (AST, AST)
+type Predicates = [Predicate]
 
-data Env = Env { getTransitionSystem :: TransitionSystem, getFrames :: Frames, getAbsPreds :: Z3 [(AST, AST)] }
+data Env = Env { getTransitionSystem :: TransitionSystem, getFrames :: Frames, getAbsPreds :: Predicates }

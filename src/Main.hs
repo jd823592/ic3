@@ -1,6 +1,7 @@
 import IC3
 import Logic
 import TransitionSystem
+import Proof
 
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State

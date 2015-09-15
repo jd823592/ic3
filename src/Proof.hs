@@ -1,75 +1,156 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
-module Proof ( Counterexample(..)
-             , Invariant(..)
-             , Proof
-             , MonadIC3(..)
-             , ProofStateT(..)
-             , ProofBranchT(..)
-             , ProofState
-             , ProofBranch
-             , MaybeDisproof
-             , MaybeProof
-             , run
-             , S.MonadState(..)
-             , throwE
-             ) where
+module Proof where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
-import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
-
-import qualified Control.Monad.State.Class as S
-
-import Environment
-
+import Control.Monad.Trans.Except
 import Z3.Monad
 
-data Counterexample = Counterexample [Cube] deriving Show
-data Invariant = Invariant Frame deriving Show
+import qualified Environment as E
+import qualified Logic as L
+import qualified TransitionSystem as T
 
-type Proof = Either Counterexample Invariant
+data Counterexample = Counterexample deriving Show
+data Invariant = Invariant deriving Show
 
-class MonadZ3 m => MonadIC3 m where
-    pushNewFrame :: m ()
-    temp :: m a -> m a
-
-newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT Env m a }
-    deriving (Functor, Applicative, Monad, MonadIO, S.MonadState Env)
-
-newtype ProofBranchT a m b = ProofBranchT { runProofBranchT :: ExceptT a (ProofStateT m) b }
-    deriving (Functor, Applicative, Monad, MonadIO, S.MonadState Env, MonadError a)
-
+type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3
-type ProofBranch e = ProofBranchT e Z3
-type MaybeDisproof = ExceptT () (ProofBranch Counterexample)
-type MaybeProof    = ExceptT Invariant (ProofBranch Counterexample)
+type ProofBranch a = ProofBranchT a ProofState
+
+class MonadZ3 m => MonadProofState m where
+    getInit      :: m T.Formula
+    getTrans     :: m T.Formula
+    getProp      :: m T.Formula
+    getAbsPreds  :: m E.Predicates
+    getFrames    :: m E.Frames
+    pushNewFrame :: m ()
+    temp         :: m a -> m a
+
+newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT E.Env m a }
 
 instance MonadTrans ProofStateT where
     lift = ProofStateT . lift
 
+instance Functor m => Functor (ProofStateT m) where
+    fmap f = ProofStateT . (fmap f) . runProofStateT
+
+instance (Functor m, Monad m) => Applicative (ProofStateT m) where
+    pure  = return
+    (<*>) = ap
+
+instance Monad m => Monad (ProofStateT m) where
+    return  = ProofStateT . return
+    a >>= b = ProofStateT (runProofStateT a >>= runProofStateT . b)
+
+instance MonadIO m => MonadIO (ProofStateT m) where
+    liftIO = lift . liftIO
+
+instance MonadZ3 m => MonadProofState (ProofStateT m) where
+    getInit      = ProofStateT $ fmap (T.getInit  . E.getTransitionSystem) get
+    getTrans     = ProofStateT $ fmap (T.getTrans . E.getTransitionSystem) get
+    getProp      = ProofStateT $ fmap (T.getProp  . E.getTransitionSystem) get
+    getFrames    = ProofStateT $ fmap E.getFrames get
+    getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
+    pushNewFrame = ProofStateT $ do
+        (E.Env ts f a) <- get
+        put (E.Env ts ([] : f) a)
+    temp a       = push >> a >>= \r -> pop 1 >> return r
+
+instance MonadZ3 m => MonadZ3 (ProofStateT m) where
+    getSolver  = lift getSolver
+    getContext = lift getContext
+
+newtype ProofBranchT a m b = ProofBranchT { runProofBranchT :: ExceptT a m b }
+
 instance MonadTrans (ProofBranchT a) where
-    lift = ProofBranchT . lift . lift
+    lift = ProofBranchT . lift
 
-instance MonadZ3 z3 => MonadZ3 (ProofStateT z3) where
+instance Functor m => Functor (ProofBranchT a m) where
+    fmap f = ProofBranchT . (fmap f) . runProofBranchT
+
+instance (Functor m, Monad m) => Applicative (ProofBranchT a m) where
+    pure  = return
+    (<*>) = ap
+
+instance Monad m => Monad (ProofBranchT a m) where
+    return  = ProofBranchT . return
+    a >>= b = ProofBranchT (runProofBranchT a >>= runProofBranchT . b)
+
+instance MonadIO m => MonadIO (ProofBranchT a m) where
+    liftIO = lift . liftIO
+
+instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) where
+    getInit      = lift getInit
+    getTrans     = lift getTrans
+    getProp      = lift getProp
+    getFrames    = lift getFrames
+    getAbsPreds  = lift getAbsPreds
+    pushNewFrame = lift pushNewFrame
+    temp         = (>>= return)
+
+instance MonadZ3 m => MonadZ3 (ProofBranchT a m) where
     getSolver  = lift getSolver
     getContext = lift getContext
 
-instance MonadZ3 z3 => MonadZ3 (ProofBranchT a z3) where
-    getSolver  = lift getSolver
-    getContext = lift getContext
+newtype MaybeDisproof a = MaybeDisproof { runDisproof :: ExceptT () (ProofBranch Counterexample) a }
 
-instance MonadZ3 z3 => MonadIC3 (ProofStateT z3) where
-    pushNewFrame = ProofStateT (modify (\env -> Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)))
-    temp a = push >> a >>= \r -> pop 1 >> return r
+instance Functor MaybeDisproof where
+    fmap f = MaybeDisproof . fmap f . runDisproof
 
-instance MonadZ3 z3 => MonadIC3 (ProofBranchT a z3) where
-    pushNewFrame = (ProofBranchT . lift) pushNewFrame
-    temp = (>>= ProofBranchT . lift . temp . return)
+instance Applicative MaybeDisproof where
+    pure  = return
+    (<*>) = ap
 
-run :: Env -> ProofBranch Counterexample Invariant -> IO (Proof, Env)
-run env = evalZ3 . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT
+instance Monad MaybeDisproof where
+    return  = MaybeDisproof . return
+    a >>= b = MaybeDisproof (runDisproof a >>= runDisproof . b)
+
+instance MonadIO MaybeDisproof where
+    liftIO = liftIO
+
+instance MonadProofState MaybeDisproof where
+    getInit      = MaybeDisproof $ lift getInit
+    getTrans     = MaybeDisproof $ lift getTrans
+    getProp      = MaybeDisproof $ lift getProp
+    getFrames    = MaybeDisproof $ lift getFrames
+    getAbsPreds  = MaybeDisproof $ lift getAbsPreds
+    pushNewFrame = MaybeDisproof $ lift pushNewFrame
+    temp         = (>>= return)
+
+instance MonadZ3 MaybeDisproof where
+    getSolver  = MaybeDisproof $ lift getSolver
+    getContext = MaybeDisproof $ lift getContext
+
+newtype MaybeProof a = MaybeProof { runProof :: ExceptT Invariant (ProofBranch Counterexample) a }
+
+instance Functor MaybeProof where
+    fmap f = MaybeProof . fmap f . runProof
+
+instance Applicative MaybeProof where
+    pure  = return
+    (<*>) = ap
+
+instance Monad MaybeProof where
+    return  = MaybeProof . return
+    a >>= b = MaybeProof (runProof a >>= runProof . b)
+
+instance MonadIO MaybeProof where
+    liftIO = liftIO
+
+instance MonadProofState MaybeProof where
+    getInit      = MaybeProof $ lift getInit
+    getTrans     = MaybeProof $ lift getTrans
+    getProp      = MaybeProof $ lift getProp
+    getFrames    = MaybeProof $ lift getFrames
+    getAbsPreds  = MaybeProof $ lift getAbsPreds
+    pushNewFrame = MaybeProof $ lift pushNewFrame
+    temp         = (>>= return)
+
+instance MonadZ3 MaybeProof where
+    getSolver  = MaybeProof $ lift getSolver
+    getContext = MaybeProof $ lift getContext
+
+run :: MonadTrans t => E.Env -> ProofBranch Counterexample Invariant -> t IO (Proof, E.Env)
+run env = lift . evalZ3 . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT
