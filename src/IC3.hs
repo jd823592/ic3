@@ -218,7 +218,7 @@ ic3 ts = ic3' env where
     --     Because Fn holds in the prefix and all hypothetical successors it is an invariant of the system.
     -- (2) Else we continue.
     prop :: MaybeProof ()
-    prop = mapExceptT lift $ do
+    prop = lift $ do
         pushNewFrame
 
         fs@(f : f' : _) <- fmap getFrames $ get

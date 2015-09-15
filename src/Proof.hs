@@ -4,15 +4,14 @@ module Proof ( Counterexample(..)
              , Invariant(..)
              , Proof
              , MonadIC3(..)
-             , ProofStateT
+             , ProofStateT(..)
              , ProofBranchT(..)
              , ProofState
              , ProofBranch
              , MaybeDisproof
              , MaybeProof
              , run
-             , get
-             , put
+             , S.MonadState(..)
              , throwE
              ) where
 
