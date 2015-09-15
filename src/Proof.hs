@@ -51,9 +51,9 @@ instance MonadZ3 z3 => MonadZ3 (ProofBranchT a z3) where
     getContext = lift getContext
 
 instance MonadZ3 z3 => MonadIC3 (ProofStateT z3) where
-    pushNewFrame = lift (modify (\env -> Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)))
+    pushNewFrame = ProofStateT (modify (\env -> Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)))
 
-    temp a = lift $ push >> a >>= \r -> pop 1 >> return r
+    temp a = push >> a >>= \r -> pop 1 >> return r
 
 instance MonadZ3 z3 => MonadIC3 (ProofBranchT a z3) where
-    pushNewFrame = lift (pushNewFrame :: ProofStateT z3 ())
+    pushNewFrame = (ProofBranchT . lift) pushNewFrame
