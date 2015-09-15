@@ -10,13 +10,13 @@ import Data.List.Split
 
 import Z3.Monad
 
-next :: AST -> Z3 AST
+next :: MonadZ3 z3 => AST -> z3 AST
 next = time 1
 
-prev :: AST -> Z3 AST
+prev :: MonadZ3 z3 => AST -> z3 AST
 prev = time (-1)
 
-time :: Int -> AST -> Z3 AST
+time :: MonadZ3 z3 => Int -> AST -> z3 AST
 time t a = do
     k <- getAstKind a
     case k of
@@ -36,7 +36,7 @@ time t a = do
                 mkApp decl =<< mapM (time t) =<< (getAppArgs app)
         otherwise -> return a
 
-untime :: AST -> Z3 AST
+untime :: MonadZ3 z3 => AST -> z3 AST
 untime a = do
     k <- getAstKind a
     case k of
@@ -57,7 +57,7 @@ untime a = do
 
         otherwise -> return a
 
-getTimedSymbol :: Symbol -> Z3 (String, Int)
+getTimedSymbol :: MonadZ3 z3 => Symbol -> z3 (String, Int)
 getTimedSymbol s = do
     raw <- getSymbolString s
 
@@ -65,10 +65,10 @@ getTimedSymbol s = do
 
     return (sym, read time)
 
-timeSymbol :: Int -> String -> Z3 Symbol
+timeSymbol :: MonadZ3 z3 => Int -> String -> z3 Symbol
 timeSymbol t s = mkStringSymbol $ s ++ '@' : show t
 
-getPreds :: AST -> Z3 [AST]
+getPreds :: MonadZ3 z3 => AST -> z3 [AST]
 getPreds a = do
     k <- getAstKind a
     case k of
@@ -83,9 +83,9 @@ getPreds a = do
 
         otherwise -> return []
 
-buildCube :: Model -> [AST] -> Z3 [AST]
+buildCube :: MonadZ3 z3 => Model -> [AST] -> z3 [AST]
 buildCube m = foldr buildCube' (return []) where
-    buildCube' :: AST -> Z3 [AST] -> Z3 [AST]
+    --buildCube' :: AST -> z3 [AST] -> z3 [AST]
     buildCube' a c = do
         ma <- modelEval m a False
         case ma of

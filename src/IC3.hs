@@ -57,7 +57,6 @@ module IC3 (ic3, Proof) where
 
 import Control.Applicative
 import Control.Monad
-import Control.Monad.Error.Class
 import Control.Monad.IO.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
@@ -89,7 +88,7 @@ ic3 ts = ic3' env where
     -- counterexamples.
     ic3' :: Env -> L.ListT IO Proof
     ic3' env = do
-        (p, env') <- lift . run $ ic3''
+        (p, env') <- lift . run env $ ic3''
         case p of
             cex@(Left  _) -> L.cons cex (ic3' env')
             inv@(Right _) -> return inv
@@ -132,10 +131,10 @@ ic3 ts = ic3' env where
         env <- get
 
         let ts = getTransitionSystem env
-        let i  = getInit  ts
-        let t  = getTrans ts
-        let p  = getProp  ts
-        let ps = getAbsPreds env
+        let i  = lift $ getInit  ts
+        let t  = lift $ getTrans ts
+        let p  = lift $ getProp  ts
+        let ps = lift $ getAbsPreds env
 
         -- reset the solver
         -- and do other cleanup necessary to allow reexecution with remembered env
@@ -157,7 +156,7 @@ ic3 ts = ic3' env where
         mapM assert =<< mapM (uncurry mkIff) =<< ps      -- assert pi <=> predi
 
         case r of
-            (Sat, Just m) -> throwE $ Counterexample [] -- init intersects error states
+            (Sat, Just m) -> ProofBranchT $ throwE $ Counterexample [] -- init intersects error states
             (Unsat, _)    -> return () -- there is no intersection between init and error states
 
     -- Find a predecessor of an error state if one exists.
@@ -190,7 +189,7 @@ ic3 ts = ic3' env where
     --   (b) Otherwise the abstraction is refined.
     -- (2) Blocking succeeds.
     block :: Cube -> MaybeDisproof ()
-    block c = lift $ lift (fmap getFrames get) >>= block' c
+    block c = lift $ (fmap getFrames get) >>= block' c
 
     block' :: Cube -> [Frame] -> ProofBranch Counterexample ()
     block' c (f:fs) = do
@@ -207,7 +206,7 @@ ic3 ts = ic3' env where
 
                     -- If actual error, block it and report it.
                     -- This allows us to search for further counterexamples.
-                    throwE $ Counterexample [] -- real error
+                    ProofBranchT $ throwE $ Counterexample [] -- real error
                 else
                     block' c fs -- block the counterexample to induction
 
@@ -220,9 +219,9 @@ ic3 ts = ic3' env where
     -- (2) Else we continue.
     prop :: MaybeProof ()
     prop = mapExceptT lift $ do
-        lift pushNewFrame
+        pushNewFrame
 
-        fs@(f : f' : _) <- fmap getFrames $ lift get
+        fs@(f : f' : _) <- fmap getFrames $ get
 
         -- TODO: propagate
 
@@ -237,15 +236,15 @@ ic3 ts = ic3' env where
     gen = return
 
     -- Activation variable for the initial states
-    iM :: Z3 AST
+    iM :: MonadZ3 z3 => z3 AST
     iM = mkBoolVar =<< mkStringSymbol "i"
 
     -- Activation variable for the transition relation
-    tM :: Z3 AST
+    tM :: MonadZ3 z3 => z3 AST
     tM = mkBoolVar =<< mkStringSymbol "t"
 
     -- Activation variable for the negated property
-    nM :: Z3 AST
+    nM :: MonadZ3 z3 => z3 AST
     nM = mkBoolVar =<< mkStringSymbol "n"
 
     -- Auxiliary functions

@@ -5,7 +5,7 @@ module Proof ( Counterexample(..)
              , Proof
              , MonadIC3(..)
              , ProofStateT
-             , ProofBranchT
+             , ProofBranchT(..)
              , ProofState
              , ProofBranch
              , MaybeDisproof
@@ -13,6 +13,7 @@ module Proof ( Counterexample(..)
              , run
              , get
              , put
+             , throwE
              ) where
 
 import Control.Applicative
