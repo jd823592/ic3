@@ -25,10 +25,10 @@ class MonadZ3 m => MonadIC3 m where
     pushNewFrame :: m ()
     temp :: m a -> m a
 
-newtype MonadZ3 z3 => ProofStateT z3 a = ProofStateT { runProofStateT :: StateT Env z3 a }
+newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT Env m a }
     deriving (Functor, Applicative, Monad, MonadIO, S.MonadState Env)
 
-newtype MonadZ3 z3 => ProofBranchT a z3 b = ProofBranchT { runProofBranchT :: ExceptT a (ProofStateT z3) b }
+newtype ProofBranchT a m b = ProofBranchT { runProofBranchT :: ExceptT a (ProofStateT m) b }
     deriving (Functor, Applicative, Monad, MonadIO, S.MonadState Env, MonadError a)
 
 type ProofState    = ProofStateT Z3
@@ -40,7 +40,7 @@ instance MonadTrans ProofStateT where
     lift = ProofStateT . lift
 
 instance MonadTrans (ProofBranchT a) where
-    lift = ProofBranchT . lift
+    lift = ProofBranchT . lift . lift
 
 instance MonadZ3 z3 => MonadZ3 (ProofStateT z3) where
     getSolver  = lift getSolver
@@ -51,9 +51,7 @@ instance MonadZ3 z3 => MonadZ3 (ProofBranchT a z3) where
     getContext = lift getContext
 
 instance MonadZ3 z3 => MonadIC3 (ProofStateT z3) where
-    pushNewFrame = do
-        env <- ProofStateT get
-        ProofStateT . put $ Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)
+    pushNewFrame = lift (modify (\env -> Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)))
 
     temp a = lift $ push >> a >>= \r -> pop 1 >> return r
 
