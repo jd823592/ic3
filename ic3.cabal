@@ -18,10 +18,11 @@ cabal-version:       >=1.10
 
 executable ic3
   main-is:             Main.hs
-  other-modules:       IC3, Environment, Logic, TransitionSystem
+  other-modules:       IC3, Environment, Logic, Proof, TransitionSystem
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.7,
                        list-t >= 0.4.5,
+                       mtl >= 2.2.1,
                        split >= 0.2.2,
                        text >= 1.1.1,
                        transformers >= 0.4.3.0,

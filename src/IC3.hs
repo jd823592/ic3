@@ -55,8 +55,11 @@
 --
 module IC3 (ic3, Proof) where
 
+import Control.Applicative
 import Control.Monad
+import Control.Monad.Error.Class
 import Control.Monad.IO.Class
+import Control.Monad.State.Class
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
@@ -68,20 +71,10 @@ import qualified ListT as L
 
 import Environment
 import Logic
+import Proof
 import TransitionSystem
 
 import Z3.Monad
-
-data Counterexample = Counterexample [Cube] deriving Show
-data Invariant = Invariant Frame deriving Show
-
-type Proof = Either Counterexample Invariant
-
--- convert these to newtypes and implement flattening features for the enclosed monads
--- instantiate MonadState, MonadIO/Z3, MonadError
--- identify other nested stacks
-type ProofState    = StateT Env Z3
-type ProofBranch a = ExceptT a ProofState
 
 -- IC3
 -- Given a transition system and a solver to use
@@ -98,7 +91,7 @@ ic3 ts = ic3' env where
     -- counterexamples.
     ic3' :: Env -> L.ListT IO Proof
     ic3' env = do
-        (p, env') <- lift . evalZ3 . (`runStateT` env) . runExceptT $ ic3''
+        (p, env') <- lift . evalZ3 . (`runStateT` env) . runExceptT . runProofBranchT $ ic3''
         case p of
             cex@(Left  _) -> L.cons cex (ic3' env')
             inv@(Right _) -> return inv
@@ -138,67 +131,59 @@ ic3 ts = ic3' env where
     -- Declare the transition relation and the property
     init :: ProofBranch Counterexample ()
     init = do
-        lift $ do
-            env <- get
+        env <- get
 
-            let ts = getTransitionSystem env
-            let i  = getInit  ts
-            let t  = getTrans ts
-            let p  = getProp  ts
-            let ps = getAbsPreds env
+        let ts = getTransitionSystem env
+        let i  = getInit  ts
+        let t  = getTrans ts
+        let p  = getProp  ts
+        let ps = getAbsPreds env
 
-            lift $ do
-                -- reset the solver
-                -- and do other cleanup necessary to allow reexecution with remembered env
+        -- reset the solver
+        -- and do other cleanup necessary to allow reexecution with remembered env
 
-                tl <- tM
-                nl <- nM
+        tl <- tM
+        nl <- nM
 
-                -- assert init and not p
-                m <- temp $ do
-                    assert =<< i
-                    assert =<< mkNot =<< p
-                    getModel
+        -- assert init and not p
+        r <- temp $ do
+            assert =<< i
+            assert =<< mkNot =<< p
+            getModel
 
-                "Extracted predicate definitions:" `trace` return ()
-                mapM (`trace` return ()) =<< mapM astToString =<< mapM (uncurry mkIff) =<< ps -- debug
+        "Extracted predicate definitions:" `trace` return ()
+        mapM (`trace` return ()) =<< mapM astToString =<< mapM (uncurry mkIff) =<< ps -- debug
 
-                assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n   => not p'
-                assert =<< mkImplies tl =<< t                    -- assert t   => trans
-                mapM assert =<< mapM (uncurry mkIff) =<< ps      -- assert pi <=> predi
+        assert =<< mkImplies nl =<< mkNot =<< next =<< p -- assert n   => not p'
+        assert =<< mkImplies tl =<< t                    -- assert t   => trans
+        mapM assert =<< mapM (uncurry mkIff) =<< ps      -- assert pi <=> predi
 
-                return m
-
-        >>= \r -> case r of
+        case r of
             (Sat, Just m) -> throwE $ Counterexample [] -- init intersects error states
-            (Unsat, _) -> return () -- there is no intersection between init and error states
+            (Unsat, _)    -> return () -- there is no intersection between init and error states
 
     -- Find a predecessor of an error state if one exists.
     -- Find a model of all pi under the assumption Fi and T and not P'.
     -- These are the assignments to the abstraction predicates in the pre-state.
-    bad :: (MonadTrans t) => ExceptT () (t ProofState) Cube
+    bad :: MaybeDisproof Cube
     bad = mapExceptT lift $ do
-        lift $ do
-            Env {getFrames = fs@(f:_), getAbsPreds = ps} <- get
+        Env {getFrames = fs@(f:_), getAbsPreds = ps} <- get
 
-            pushNewFrame -- utter nonsense, just debugging, to make this loop stop
+        pushNewFrame -- utter nonsense, just debugging, to make this loop stop
 
-            lift $ temp $ do
-                assert =<< mkAnd =<< T.sequence [ tM, nM ]
-                when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
-                getModel
+        r <- temp $ do
+            assert =<< mkAnd =<< T.sequence [ tM, nM ]
+            when (length fs == 3) $ assert =<< mkFalse -- debugging, replace with actual query for a model
+            getModel
 
-        >>= \r -> case r of
+        case r of
             (Sat, Just m) -> do
-                lift $ do
-                    Env {getAbsPreds = ps} <- get
+                Env {getAbsPreds = ps} <- get
 
-                    lift $ do
-                        c <- buildCube m =<< fmap (map fst) ps
-                        ("Bad cube (" ++ show (length c) ++ "):") `trace` return ()
-                        mapM (`trace` return ()) =<< mapM astToString c
-                        return c
-                >>= return . return -- bad cube found
+                c <- buildCube m =<< fmap (map fst) ps
+                ("Bad cube (" ++ show (length c) ++ "):") `trace` return ()
+                mapM (`trace` return ()) =<< mapM astToString c
+                return c -- bad cube found
             (Unsat, _) -> throwE () -- there is none
 
     -- Try recursively blocking the bad cube (error predecessor state).
@@ -206,13 +191,13 @@ ic3 ts = ic3' env where
     --   (a) Then if the cex is real, it is returned.
     --   (b) Otherwise the abstraction is refined.
     -- (2) Blocking succeeds.
-    block :: Cube -> ExceptT () (ProofBranch Counterexample) ()
+    block :: Cube -> MaybeDisproof ()
     block c = lift $ lift (fmap getFrames get) >>= block' c
 
     block' :: Cube -> [Frame] -> ProofBranch Counterexample ()
     block' c (f:fs) = do
         -- TODO: loop while there are predecessors
-        r <- lift . lift $ check -- extract counterexample to induction (CTI)
+        r <- check -- extract counterexample to induction (CTI)
         case r of
             Sat   -> return () -- blocked
             Unsat -> if length fs == 0
@@ -235,7 +220,7 @@ ic3 ts = ic3' env where
     --     more in the next iteration and thus we have encountered a fixpoint and we can terminate.
     --     Because Fn holds in the prefix and all hypothetical successors it is an invariant of the system.
     -- (2) Else we continue.
-    prop :: (MonadTrans t) => ExceptT Invariant (t ProofState) ()
+    prop :: MaybeProof ()
     prop = mapExceptT lift $ do
         lift pushNewFrame
 
@@ -252,12 +237,6 @@ ic3 ts = ic3' env where
     -- Generalise the cube to be blocked to rule out other counterexamples
     gen :: Cube -> ProofState Cube
     gen = return
-
-    -- Push a new frame
-    pushNewFrame :: ProofState ()
-    pushNewFrame = do
-        env <- get
-        put $ Env (getTransitionSystem env) ([] : getFrames env) (getAbsPreds env)
 
     -- Activation variable for the initial states
     iM :: Z3 AST
@@ -277,6 +256,3 @@ ic3 ts = ic3' env where
 
     loop' :: Monad m => ExceptT () m () -> ExceptT Invariant m ()
     loop' = lift . loop
-
-    temp :: MonadZ3 z3 => z3 a -> z3 a
-    temp a = push >> a >>= \r -> pop 1 >> return r
