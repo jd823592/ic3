@@ -85,7 +85,7 @@ getPreds a = do
 
 buildCube :: MonadZ3 z3 => Model -> [AST] -> z3 [AST]
 buildCube m = foldr buildCube' (return []) where
-    --buildCube' :: AST -> z3 [AST] -> z3 [AST]
+    buildCube' :: MonadZ3 z3 => AST -> z3 [AST] -> z3 [AST]
     buildCube' a c = do
         ma <- modelEval m a False
         case ma of

@@ -12,8 +12,8 @@ import qualified Environment as E
 import qualified Logic as L
 import qualified TransitionSystem as T
 
-data Counterexample = Counterexample deriving Show
-data Invariant = Invariant deriving Show
+data Counterexample = Counterexample E.Cubes deriving Show
+data Invariant = Invariant E.Frame deriving Show
 
 type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3
@@ -88,7 +88,7 @@ instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) wh
     getFrames    = lift getFrames
     getAbsPreds  = lift getAbsPreds
     pushNewFrame = lift pushNewFrame
-    temp         = (>>= return)
+    temp         = ProofBranchT . ExceptT . temp . runExceptT . runProofBranchT
 
 instance MonadZ3 m => MonadZ3 (ProofBranchT a m) where
     getSolver  = lift getSolver
@@ -108,7 +108,7 @@ instance Monad MaybeDisproof where
     a >>= b = MaybeDisproof (runDisproof a >>= runDisproof . b)
 
 instance MonadIO MaybeDisproof where
-    liftIO = liftIO
+    liftIO = MaybeDisproof . liftIO
 
 instance MonadProofState MaybeDisproof where
     getInit      = MaybeDisproof $ lift getInit
@@ -117,7 +117,7 @@ instance MonadProofState MaybeDisproof where
     getFrames    = MaybeDisproof $ lift getFrames
     getAbsPreds  = MaybeDisproof $ lift getAbsPreds
     pushNewFrame = MaybeDisproof $ lift pushNewFrame
-    temp         = (>>= return)
+    temp         = MaybeDisproof . ExceptT . temp . runExceptT . runDisproof
 
 instance MonadZ3 MaybeDisproof where
     getSolver  = MaybeDisproof $ lift getSolver
@@ -137,7 +137,7 @@ instance Monad MaybeProof where
     a >>= b = MaybeProof (runProof a >>= runProof . b)
 
 instance MonadIO MaybeProof where
-    liftIO = liftIO
+    liftIO = MaybeProof . liftIO
 
 instance MonadProofState MaybeProof where
     getInit      = MaybeProof $ lift getInit
@@ -146,11 +146,11 @@ instance MonadProofState MaybeProof where
     getFrames    = MaybeProof $ lift getFrames
     getAbsPreds  = MaybeProof $ lift getAbsPreds
     pushNewFrame = MaybeProof $ lift pushNewFrame
-    temp         = (>>= return)
+    temp         = MaybeProof . ExceptT . temp . runExceptT . runProof
 
 instance MonadZ3 MaybeProof where
     getSolver  = MaybeProof $ lift getSolver
     getContext = MaybeProof $ lift getContext
 
-run :: MonadTrans t => E.Env -> ProofBranch Counterexample Invariant -> t IO (Proof, E.Env)
-run env = lift . evalZ3 . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT
+run :: MonadTrans t => E.Env -> ProofBranch Counterexample Invariant -> t Z3 (Proof, E.Env)
+run env = lift . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT

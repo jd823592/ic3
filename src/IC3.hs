@@ -60,6 +60,8 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import qualified ListT as L
 import qualified Data.Traversable as T
+import Data.List
+import Debug.Trace
 
 import Z3.Monad
 
@@ -73,15 +75,15 @@ import qualified TransitionSystem as TS
 -- it attempts to decide whether the system is safe.
 -- It returns either a counterexample as a witness of unsafety
 -- or an invariant as a certificate of safety.
-ic3 :: TS.TransitionSystem -> L.ListT IO Proof -- Todo make it live in MonadZ3 maybe?! TODO
-ic3 ts = ic3' env where
+ic3 :: TS.TransitionSystem -> L.ListT Z3 Proof
+ic3 ts = ic3' =<< lift env where
 
     -- Restart the IC3 after a counterexample is found.
     -- By keeping the work that IC3 has done so far, and
     -- blocking the latest counterexample, we can countinue
     -- until an invariant is found, thus enumerating multiple
     -- counterexamples.
-    ic3' :: E.Env -> L.ListT IO Proof
+    ic3' :: E.Env -> L.ListT Z3 Proof
     ic3' env = do
         (p, env') <- run env ic3''
         case p of
@@ -103,14 +105,18 @@ ic3 ts = ic3' env where
     -- These steps are done once and they are not executed when ic3 is restarted on the same input.
     -- Initially there is one empty frame.
     -- The initial set of abstraction predicates is extracted from i, t, and p.
-    env :: E.Env
-    env = let i = TS.getInit  ts
-              t = TS.getTrans ts
-              p = TS.getProp  ts
+    env :: Z3 E.Env
+    env = do
+        let i = TS.getInit  ts
+            t = TS.getTrans ts
+            p = TS.getProp  ts
 
-              -- Extract predicates
+        -- Extract unique predicates from i, t, and p.
+        -- Allocate a new variable for each.
+        predDefs <- fmap (map head . group . sort . concat) $ T.sequence $ map getPreds [i, t, p]
+        predVars <- let n = length predDefs in T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
 
-              preds = [] in E.Env ts [[]] preds
+        return $ E.Env ts [[]] (zip predVars predDefs)
 
     -- Initial step
     -- Declare the transition relation and the property
@@ -134,7 +140,7 @@ ic3 ts = ic3' env where
         mapM assert =<< mapM (uncurry mkIff) ps
 
         case r of
-            (Sat, Just m) -> ProofBranchT $ throwE Counterexample
+            (Sat, Just m) -> ProofBranchT $ throwE $ Counterexample []
             (Unsat,    _) -> return ()
 
     -- Find a predecessor of an error state if one exists.
@@ -149,7 +155,7 @@ ic3 ts = ic3' env where
 
         r <- temp $ do
             assert =<< mkAnd =<< T.sequence [ tM, nM ]
-            when (length fs == 3) $ assert =<< mkFalse -- debug
+            assert =<< mkTrue
             getModel
 
         case r of
@@ -167,11 +173,12 @@ ic3 ts = ic3' env where
     block' :: E.Cube -> E.Frames -> MaybeDisproof ()
     block' c (f:fs) = do
         r <- check
+        r <- return Unsat
         case r of
             Sat   -> return () -- blocked
             Unsat -> if length fs == 0
                 then do
-                    MaybeDisproof $ lift $ ProofBranchT $ throwE Counterexample
+                    MaybeDisproof $ lift $ ProofBranchT $ throwE $ Counterexample [c]
                 else
                     block' c fs -- block the counterexample to induction
 
@@ -191,7 +198,7 @@ ic3 ts = ic3' env where
         -- TODO: propagate
 
         if length f' == 0
-        then MaybeProof $ throwE Invariant
+        then MaybeProof $ throwE $ Invariant []
         else return ()
 
     --gen :: E.Cube -> MaybeDisproof
