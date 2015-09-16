@@ -151,13 +151,12 @@ ic3 ts = ic3' =<< lift env where
         fs@(f : _) <- getFrames
         ps         <- getAbsPreds
 
-        pushNewFrame -- debug
-
         r <- temp $ do
             assert =<< mkAnd =<< T.sequence [ tM, nM ]
             assert =<< mkTrue
             getModel
 
+        --r <- return (Unsat, Nothing) -- debug
         case r of
             (Sat, Just m) -> buildCube m (map fst ps)
             (Unsat,    _) -> MaybeDisproof $ throwE ()
@@ -173,7 +172,7 @@ ic3 ts = ic3' =<< lift env where
     block' :: E.Cube -> E.Frames -> MaybeDisproof ()
     block' c (f:fs) = do
         r <- check
-        r <- return Unsat
+        r <- return Unsat -- debug
         case r of
             Sat   -> return () -- blocked
             Unsat -> if length fs == 0

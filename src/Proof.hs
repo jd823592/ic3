@@ -12,8 +12,21 @@ import qualified Environment as E
 import qualified Logic as L
 import qualified TransitionSystem as T
 
-data Counterexample = Counterexample E.Cubes deriving Show
-data Invariant = Invariant E.Frame deriving Show
+class Reportable c where
+    stringify :: MonadZ3 m => c -> m String
+
+data Counterexample = Counterexample E.Cubes
+data Invariant = Invariant E.Frame
+
+instance Reportable Counterexample where
+    stringify (Counterexample cs) = do
+        syms  <- mapM (mapM (getSymbolString <=< getDeclName <=< getAppDecl <=< toApp)) cs
+        return $ "Counterexample " ++ show syms
+
+instance Reportable Invariant where
+    stringify (Invariant f) = do
+        syms  <- mapM (mapM (getSymbolString <=< getDeclName <=< getAppDecl <=< toApp)) f
+        return $ "Invariant " ++ show syms
 
 type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3

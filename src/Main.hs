@@ -16,8 +16,8 @@ data Report = Safe | Unsafe deriving Show
 report :: L.ListT Z3 Proof -> IO ()
 report ps = evalZ3 (L.fold report' (1, Safe) (enum ps)) >>= print . snd where
     report' :: (Int, Report) -> Proof -> Z3 (Int, Report)
-    report' (n, _) (Left  cex) = liftIO (putStrLn $ "cex " ++ show n ++ ": " ++ show cex) >> return (n + 1, Unsafe)
-    report' (n, r) (Right inv) = liftIO (putStrLn $ "inv: " ++ show inv) >> return (n, r)
+    report' (n, _) (Left  cex) = stringify cex >>= liftIO . (\cexStr -> putStrLn $ "cex " ++ show n ++ ": " ++ cexStr) >> return (n + 1, Unsafe)
+    report' (n, r) (Right inv) = stringify inv >>= liftIO . (\invStr -> putStrLn $ "inv: "                  ++ invStr) >> return (n, r)
 
 enum :: L.ListT Z3 Proof -> L.ListT Z3 Proof
 --enum = L. take 1
