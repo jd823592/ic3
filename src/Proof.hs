@@ -20,13 +20,19 @@ data Invariant = Invariant E.Frame
 
 instance Reportable Counterexample where
     stringify (Counterexample cs) = do
-        syms  <- mapM (mapM (getSymbolString <=< getDeclName <=< getAppDecl <=< toApp)) cs
+        syms  <- mapM (mapM stringifyLit) cs
         return $ "Counterexample " ++ show syms
 
 instance Reportable Invariant where
     stringify (Invariant f) = do
-        syms  <- mapM (mapM (getSymbolString <=< getDeclName <=< getAppDecl <=< toApp)) f
+        syms  <- mapM (mapM stringifyLit) f
         return $ "Invariant " ++ show syms
+
+stringifyLit :: MonadZ3 m => AST -> m String
+stringifyLit l = do
+    app <- toApp l
+    sym <- getSymbolString =<< getDeclName =<< getAppDecl app
+    if sym == "not" then return . ("not " ++) =<< stringifyLit =<< getAppArg app 0 else return sym
 
 type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3
