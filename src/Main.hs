@@ -14,7 +14,7 @@ import Z3.Monad
 data Report = Safe | Unsafe deriving Show
 
 report :: L.ListT Z3 Proof -> IO ()
-report ps = evalZ3 (L.fold report' (1, Safe) (enum ps)) >>= print . snd where
+report ps = evalZ3With (Just QF_LIA) (opt "model" True) (L.fold report' (1, Safe) (enum ps)) >>= print . snd where
     report' :: (Int, Report) -> Proof -> Z3 (Int, Report)
     report' (n, _) (Left  cex) = stringify cex >>= liftIO . (\cexStr -> putStrLn $ "cex " ++ show n ++ ": " ++ cexStr) >> return (n + 1, Unsafe)
     report' (n, r) (Right inv) = stringify inv >>= liftIO . (\invStr -> putStrLn $ "inv: "                  ++ invStr) >> return (n, r)

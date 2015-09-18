@@ -7,8 +7,10 @@ module Logic ( time
              , expandCube
              ) where
 
+import Control.Monad
 import Data.List.Split
 import qualified Data.Map as Map
+import Debug.Trace
 
 import Z3.Monad
 
@@ -93,12 +95,11 @@ buildCube m = foldr buildCube' (return []) where
         case ma of
             Nothing -> c
             Just ma' -> do
-                v <- getBool ma'
-                if v
-                then return . (a:) =<< c
-                else do
-                    n <- mkNot a
-                    return . (n:) =<< c
+                v <- getBoolValue ma'
+                case v of
+                    Just True  -> return . (a:) =<< c
+                    Just False -> liftM2 (:) (mkNot a) c
+                    Nothing    -> c
 
 expandCube :: MonadZ3 z3 => [(AST, AST)] -> [AST] -> z3 [AST]
 expandCube exp = mapM (expandLit exp)

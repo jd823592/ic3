@@ -68,8 +68,11 @@ type ProofBranch a = ProofBranchT a ProofState
 
 class MonadZ3 m => MonadProofState m where
     getInit      :: m T.Formula
+    getInitL     :: m T.Formula
     getTrans     :: m T.Formula
+    getTransL    :: m T.Formula
     getProp      :: m T.Formula
+    getPropL     :: m T.Formula
     getAbsPreds  :: m E.Predicates
     getFrames    :: m E.Frames
     pushNewFrame :: m ()
@@ -96,10 +99,14 @@ instance MonadIO m => MonadIO (ProofStateT m) where
 
 instance MonadZ3 m => MonadProofState (ProofStateT m) where
     getInit      = ProofStateT $ fmap (T.getInit  . E.getTransitionSystem) get
+    getInitL     = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "i"
     getTrans     = ProofStateT $ fmap (T.getTrans . E.getTransitionSystem) get
+    getTransL    = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "t"
     getProp      = ProofStateT $ fmap (T.getProp  . E.getTransitionSystem) get
+    getPropL     = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "n"
     getFrames    = ProofStateT $ fmap E.getFrames get
     getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
+
     pushNewFrame = ProofStateT $ do
         (E.Env ts f a) <- get
         put (E.Env ts ([] : f) a)
@@ -130,8 +137,11 @@ instance MonadIO m => MonadIO (ProofBranchT a m) where
 
 instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) where
     getInit      = lift getInit
+    getInitL     = lift getInitL
     getTrans     = lift getTrans
+    getTransL    = lift getTransL
     getProp      = lift getProp
+    getPropL     = lift getPropL
     getFrames    = lift getFrames
     getAbsPreds  = lift getAbsPreds
     pushNewFrame = lift pushNewFrame
@@ -140,64 +150,3 @@ instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) wh
 instance MonadZ3 m => MonadZ3 (ProofBranchT a m) where
     getSolver  = lift getSolver
     getContext = lift getContext
-
-newtype MaybeDisproof a = MaybeDisproof { runDisproof :: ExceptT () (ProofBranch Counterexample) a }
-
-instance Functor MaybeDisproof where
-    fmap f = MaybeDisproof . fmap f . runDisproof
-
-instance Applicative MaybeDisproof where
-    pure  = return
-    (<*>) = ap
-
-instance Monad MaybeDisproof where
-    return  = MaybeDisproof . return
-    a >>= b = MaybeDisproof (runDisproof a >>= runDisproof . b)
-
-instance MonadIO MaybeDisproof where
-    liftIO = MaybeDisproof . liftIO
-
-instance MonadProofState MaybeDisproof where
-    getInit      = MaybeDisproof $ lift getInit
-    getTrans     = MaybeDisproof $ lift getTrans
-    getProp      = MaybeDisproof $ lift getProp
-    getFrames    = MaybeDisproof $ lift getFrames
-    getAbsPreds  = MaybeDisproof $ lift getAbsPreds
-    pushNewFrame = MaybeDisproof $ lift pushNewFrame
-    temp         = MaybeDisproof . ExceptT . temp . runExceptT . runDisproof
-
-instance MonadZ3 MaybeDisproof where
-    getSolver  = MaybeDisproof $ lift getSolver
-    getContext = MaybeDisproof $ lift getContext
-
-newtype MaybeProof a = MaybeProof { runProof :: ExceptT Invariant (ProofBranch Counterexample) a }
-
-instance Functor MaybeProof where
-    fmap f = MaybeProof . fmap f . runProof
-
-instance Applicative MaybeProof where
-    pure  = return
-    (<*>) = ap
-
-instance Monad MaybeProof where
-    return  = MaybeProof . return
-    a >>= b = MaybeProof (runProof a >>= runProof . b)
-
-instance MonadIO MaybeProof where
-    liftIO = MaybeProof . liftIO
-
-instance MonadProofState MaybeProof where
-    getInit      = MaybeProof $ lift getInit
-    getTrans     = MaybeProof $ lift getTrans
-    getProp      = MaybeProof $ lift getProp
-    getFrames    = MaybeProof $ lift getFrames
-    getAbsPreds  = MaybeProof $ lift getAbsPreds
-    pushNewFrame = MaybeProof $ lift pushNewFrame
-    temp         = MaybeProof . ExceptT . temp . runExceptT . runProof
-
-instance MonadZ3 MaybeProof where
-    getSolver  = MaybeProof $ lift getSolver
-    getContext = MaybeProof $ lift getContext
-
-run :: MonadTrans t => E.Env -> ProofBranch Counterexample Invariant -> t Z3 (Proof, E.Env)
-run env = lift . (`runStateT` env) . runProofStateT . runExceptT . runProofBranchT
