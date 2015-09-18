@@ -176,9 +176,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         else return ()
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
-    (<|>) l r m = case m of
-        Just d  -> mapL Left (l d)
-        Nothing -> mapL Right r
+    (<|>) l _ (Just d) = mapL Left (l d)
+    (<|>) _ r _        = mapL Right r
 
     mapL :: (a -> c) -> ProofBranch a b -> ProofBranch c b
     mapL f = ProofBranchT . ExceptT . fmap (either (Left . f) Right) . runExceptT . runProofBranchT
