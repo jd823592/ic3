@@ -177,7 +177,8 @@ ic3 ts = ic3' =<< lift env where
             Sat   -> return () -- blocked
             Unsat -> if length fs == 0
                 then do
-                    MaybeDisproof $ lift $ ProofBranchT $ throwE $ Counterexample [c]
+                    exp <- getAbsPreds
+                    MaybeDisproof . lift . ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) [c]
                 else
                     block' c fs -- block the counterexample to induction
 

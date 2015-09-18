@@ -4,9 +4,11 @@ module Logic ( time
              , prev
              , getPreds
              , buildCube
+             , expandCube
              ) where
 
 import Data.List.Split
+import qualified Data.Map as Map
 
 import Z3.Monad
 
@@ -61,7 +63,7 @@ getTimedSymbol :: MonadZ3 z3 => Symbol -> z3 (String, Int)
 getTimedSymbol s = do
     raw <- getSymbolString s
 
-    let [sym, time] = splitOn "@" raw ++ ["0"]
+    let (sym : time : _) = splitOn "@" raw ++ ["0"]
 
     return (sym, read time)
 
@@ -78,7 +80,7 @@ getPreds a = do
             sym  <- getSymbolString =<< getDeclName decl
 
             if sym `elem` ["=", "<"]
-            then return [a]
+            then mapM untime [a]
             else fmap concat $ mapM getPreds =<< getAppArgs app
 
         otherwise -> return []
@@ -97,3 +99,20 @@ buildCube m = foldr buildCube' (return []) where
                 else do
                     n <- mkNot a
                     return . (n:) =<< c
+
+expandCube :: MonadZ3 z3 => [(AST, AST)] -> [AST] -> z3 [AST]
+expandCube exp = mapM (expandLit exp)
+
+expandLit ::  MonadZ3 z3 => [(AST, AST)] -> AST -> z3 AST
+expandLit exp l = expandLit' False l where
+    expandLit' :: MonadZ3 z3 => Bool -> AST -> z3 AST
+    expandLit' neg l = do
+        app  <- toApp l
+        decl <- getAppDecl app
+        sym <- getSymbolString =<< getDeclName decl
+        if sym == "not"
+        then expandLit' True =<< getAppArg app 0
+        else (if neg then mkNot else return) =<< expandAtom l
+
+    expandAtom :: MonadZ3 z3 => AST -> z3 AST
+    expandAtom = return . (Map.fromList exp Map.!)

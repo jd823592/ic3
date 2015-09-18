@@ -21,6 +21,7 @@ executable ic3
   other-modules:       IC3, Environment, Logic, Proof, TransitionSystem
   -- other-extensions:    
   build-depends:       base >=4.6 && <4.7,
+                       containers >= 0.5.0,
                        list-t >= 0.4.5,
                        split >= 0.2.2,
                        text >= 1.1.1,
