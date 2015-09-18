@@ -101,7 +101,7 @@ runic3 :: E.Env -> ProofBranch Proof Proof -> L.ListT Z3 (Proof, E.Env)
 runic3 env = lift . (`runStateT` env) . runProofStateT . fmap (either id id) . runExceptT . runProofBranchT
 
 -- IC3
-ic3core :: ProofBranch Proof Proof
+ic3core :: ProofBranch Proof a
 ic3core = init >> loop (bad >>= block <|> prop) where
     init :: ProofBranch Proof ()
     init = do
