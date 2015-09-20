@@ -73,8 +73,9 @@ class MonadZ3 m => MonadProofState m where
     getTransL    :: m T.Formula
     getProp      :: m T.Formula
     getPropL     :: m T.Formula
-    getAbsPreds  :: m E.Predicates
     getFrames    :: m E.Frames
+    getAbsPreds  :: m E.Predicates
+    setFrames    :: E.Frames -> m ()
     pushNewFrame :: m ()
     temp         :: m a -> m a
 
@@ -106,7 +107,9 @@ instance MonadZ3 m => MonadProofState (ProofStateT m) where
     getPropL     = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "n"
     getFrames    = ProofStateT $ fmap E.getFrames get
     getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
-
+    setFrames f  = ProofStateT $ do
+        (E.Env ts _ a) <- get
+        put (E.Env ts f a)
     pushNewFrame = ProofStateT $ do
         (E.Env ts f a) <- get
         put (E.Env ts ([] : f) a)
@@ -144,6 +147,7 @@ instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) wh
     getPropL     = lift getPropL
     getFrames    = lift getFrames
     getAbsPreds  = lift getAbsPreds
+    setFrames f  = lift (setFrames f)
     pushNewFrame = lift pushNewFrame
     temp         = ProofBranchT . ExceptT . temp . runExceptT . runProofBranchT
 

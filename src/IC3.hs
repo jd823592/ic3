@@ -106,6 +106,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     init :: ProofBranch Proof ()
     init = do
         i  <- getInit
+        il <- getInitL
         t  <- getTrans
         tl <- getTransL
         p  <- getProp
@@ -117,8 +118,9 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             assert =<< mkNot p
             getModel
 
-        assert =<< mkImplies nl =<< mkNot =<< next p
+        assert =<< mkImplies il i
         assert =<< mkImplies tl t
+        assert =<< mkImplies nl =<< mkNot =<< next p
         mapM assert =<< mapM (uncurry mkIff) ps
 
         case r of
@@ -131,12 +133,12 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- Find cube of states that may reach an error state in one step.
     bad :: ProofBranch Proof (Maybe E.Cube)
     bad = do
-        fs@(f : _) <- getFrames
-        ps         <- getAbsPreds
+        (f : fs) <- getFrames
+        ps       <- getAbsPreds
 
         r <- temp $ do
+            when (length fs == 0) $ assert =<< getInitL
             assert =<< mkAnd =<< T.sequence [ getTransL, getPropL ]
-            assert =<< mkTrue
             getModel
 
         case r of
@@ -148,18 +150,33 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     --   (a) the cex is real, it is returned,
     --   (b) otherwise the abstraction is refined.
     block :: E.Cube -> ProofBranch Counterexample ()
-    block c = block' c =<< getFrames where
-        block' :: E.Cube -> E.Frames -> ProofBranch Counterexample ()
-        block' c (f : fs) = do
-            r <- check
+    block c = do
+        (f : fs) <- getFrames
+        fs' <- block' [c] [f] fs
+        setFrames fs' where
+
+        block' :: [E.Cube] -> E.Frames -> E.Frames -> ProofBranch Counterexample E.Frames
+        block' cs rfs [] = do
+            exp <- getAbsPreds
+            setFrames (reverse rfs)
+            ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
+        block' cs@(c : _) rfs@(rf : _) lfs@(lf : lfs') = do
+            r <- temp $ do
+                assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) lf                     -- Fi
+                assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi+1 ... Fn
+                assert =<< mkNot =<< mkAnd c                                       -- not c
+                assert =<< getTransL                                               -- T
+                assert =<< next =<< mkAnd c                                        -- c'
+                getModel
             case r of
-                Sat   -> return () -- blocked
-                Unsat -> if length fs == 0
-                    then do
-                        exp <- getAbsPreds
-                        ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) [c]
-                    else
-                        block' c fs -- block the counterexample to induction
+                (Unsat, _) -> do
+                    return (rf : (c : lf) : lfs') -- blocked
+                (Sat, Just m) -> do
+                    ps <- getAbsPreds
+                    c' <- buildCube m (map fst ps)
+                    -- 1. block current predecessor (counterexample to induction) in lower frame
+                    -- 2. block any other predecessor
+                    block' (c' : cs) (lf : rfs) lfs' >>= block' cs rfs
 
     -- Propagate inductive blocked cubes to higher frames.
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
@@ -167,12 +184,12 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     prop = do
         pushNewFrame
 
-        fs@(f : f' : _) <- getFrames
-
         -- TODO: propagate
 
+        fs@(f : f' : _) <- getFrames
+
         if length f' == 0
-        then ProofBranchT . throwE $ Invariant []
+        then ProofBranchT . throwE $ Invariant f'
         else return ()
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
