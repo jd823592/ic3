@@ -19,48 +19,48 @@ class Reportable c where
 data Counterexample = Counterexample E.Cubes
 data Invariant = Invariant E.Frame
 
+instance Reportable AST where
+    stringify = stringify' False where
+        stringify' :: MonadZ3 m => Bool -> AST -> m String
+        stringify' neg l = do
+            app <- toApp l
+            sym <- getSymbolString =<< getDeclName =<< getAppDecl app
+            case sym of
+                "not" -> stringify' True =<< getAppArg app 0
+                "=" -> do
+                    [x, y] <- mapM stringifyTerm =<< getAppArgs app
+                    return . concat $ [x, if neg then " /= " else " = ", y]
+                "<" -> do
+                    [x, y] <- mapM stringifyTerm =<< getAppArgs app
+                    return . concat $ [x, if neg then " >= " else " < ", y]
+                otherwise -> return $ (if neg then "not " else "") ++ sym
+
+        stringifyTerm :: MonadZ3 m => AST -> m String
+        stringifyTerm t = do
+            k    <- getAstKind t
+            app  <- toApp t
+            decl <- getAppDecl app
+            sym  <- getSymbolString =<< getDeclName decl
+            n    <- getAppNumArgs app
+            case k of
+                Z3_NUMERAL_AST -> fmap show $ getInt t
+                otherwise      -> do
+                    args <- mapM stringifyTerm =<< getAppArgs app
+                    if sym `elem` ["+", "-", "*", "/"]
+                    then return $ intercalate (" " ++ sym ++ " ") args
+                    else if n > 0
+                    then return $ sym ++  "(" ++ intercalate (", ") args ++ ")"
+                    else return sym
+
 instance Reportable Counterexample where
     stringify (Counterexample cs) = do
-        syms  <- mapM (liftM (intercalate ",") . mapM stringifyLit) cs
+        syms  <- mapM (liftM (intercalate ",") . mapM stringify) cs
         return $ "Counterexample " ++ show syms
 
 instance Reportable Invariant where
     stringify (Invariant f) = do
-        syms  <- mapM (liftM (intercalate ",") . mapM stringifyLit) f
+        syms  <- mapM (liftM (intercalate ",") . mapM stringify) f
         return $ "Invariant " ++ show syms
-
-stringifyLit :: MonadZ3 m => AST -> m String
-stringifyLit = stringifyLit' False where
-    stringifyLit' :: MonadZ3 m => Bool -> AST -> m String
-    stringifyLit' neg l = do
-        app <- toApp l
-        sym <- getSymbolString =<< getDeclName =<< getAppDecl app
-        case sym of
-            "not" -> stringifyLit' True =<< getAppArg app 0
-            "=" -> do
-                [x, y] <- mapM stringifyTerm =<< getAppArgs app
-                return . concat $ [x, if neg then " /= " else " = ", y]
-            "<" -> do
-                [x, y] <- mapM stringifyTerm =<< getAppArgs app
-                return . concat $ [x, if neg then " >= " else " < ", y]
-            otherwise -> return $ (if neg then "not " else "") ++ sym
-
-    stringifyTerm :: MonadZ3 m => AST -> m String
-    stringifyTerm t = do
-        k    <- getAstKind t
-        app  <- toApp t
-        decl <- getAppDecl app
-        sym  <- getSymbolString =<< getDeclName decl
-        n    <- getAppNumArgs app
-        case k of
-            Z3_NUMERAL_AST -> fmap show $ getInt t
-            otherwise      -> do
-                args <- mapM stringifyTerm =<< getAppArgs app
-                if sym `elem` ["+", "-", "*", "/"]
-                then return $ intercalate (" " ++ sym ++ " ") args
-                else if n > 0
-                then return $ sym ++  "(" ++ intercalate (", ") args ++ ")"
-                else return sym
 
 type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3

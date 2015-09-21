@@ -105,8 +105,6 @@ ic3core :: ProofBranch Proof a
 ic3core = init >> loop (bad >>= block <|> prop) where
     init :: ProofBranch Proof ()
     init = do
-        logMsg "init"
-
         i  <- getInit
         il <- getInitL
         t  <- getTrans
@@ -143,8 +141,6 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             assert =<< mkAnd =<< T.sequence [ getTransL, getPropL ] -- T, not P'
             getModel
 
-        logMsg ("bad " ++ show (fst r))
-
         case r of
             (Sat, Just m) -> fmap Just $ buildCube m (map fst ps)
             (Unsat,    _) -> return Nothing
@@ -155,14 +151,12 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     --   (b) otherwise the abstraction is refined.
     block :: E.Cube -> ProofBranch Counterexample ()
     block c = do
-        logMsg "block"
-
         (f : fs) <- getFrames
         fs' <- block' [c] [f] fs
         setFrames fs' where
 
         block' :: [E.Cube] -> E.Frames -> E.Frames -> ProofBranch Counterexample E.Frames
-        block' cs@(c : _) rfs@(rf : _) [] = do
+        block' cs@(c : _) (rf : rfs) [] = do
             r <- temp $ do
                 assert =<< getInitL -- I
                 assert =<< mkAnd c  -- c
@@ -171,20 +165,18 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 (Unsat, _)    -> return [ (c : rf) ]
                 (Sat, Just m) -> do
                     exp <- getAbsPreds
-                    setFrames (reverse rfs)
+                    setFrames (reverse ((c : rf) : rfs))
                     ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
         block' cs@(c : _) rfs@(rf : _) lfs@(lf : lfs') = do
             r <- temp $ do
-                assert =<<                 mkAnd =<<  mapM (mkNot <=< mkAnd)   lf  -- Fi
-                assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi+1 ... Fn
-                assert =<< mkNot =<< mkAnd c                                        -- not c
-                assert =<< getTransL                                                -- T
-                assert =<< next =<< mkAnd c                                         -- c'
+                assert =<<                 mkAnd =<<  mapM (mkNot <=< mkAnd)   lf  -- Fi-1
+                assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi ... Fn
+                assert =<< mkNot =<< mkAnd c                                       -- not c
+                assert =<< getTransL                                               -- T
+                assert =<< next =<< mkAnd c                                        -- c'
                 getModel
             case r of
-                (Unsat, _) -> do
-                    logMsg "blocked"
-                    return (rf : (c : lf) : lfs') -- blocked
+                (Unsat, _) -> return ((c : rf) : lfs) -- blocked
                 (Sat, Just m) -> do
                     ps <- getAbsPreds
                     c' <- buildCube m (map fst ps)
@@ -196,17 +188,34 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
     prop :: ProofBranch Invariant ()
     prop = do
-        logMsg "prop"
+        fs@(f : f' : _) <- prop' =<< getFrames
+        exp             <- getAbsPreds
 
-        pushNewFrame
+        setFrames fs
 
-        -- TODO: propagate
+        when (length f' == 0) $ ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) f  where
 
-        fs@(f : f' : _) <- getFrames
+        prop' :: E.Frames -> ProofBranch Invariant E.Frames
+        prop' []       = return [[]]
+        prop' (f : fs) = do
+            (ic : p) <- prop' fs
 
-        if length f' == 0
-        then ProofBranchT . throwE $ Invariant f'
-        else return ()
+            let f' = (map head . group . sort) (ic ++ f)
+
+            (ic', f'') <- foldM (collectInd f') ([], []) f'
+
+            return (ic' : f'' : p)
+
+        collectInd :: E.Frame -> ([E.Cube], [E.Cube]) -> E.Cube -> ProofBranch Invariant ([E.Cube], [E.Cube])
+        collectInd f (ic, f') c = do
+            r <- temp $ do
+                assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f
+                assert =<< getTransL
+                assert =<< next =<< mkNot =<< mkAnd c
+                check
+            case r of
+                Sat   -> return (    ic, c : f') -- not inductive
+                Unsat -> return (c : ic,     f') -- inductive
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
     (<|>) l _ (Just d) = mapL Left (l d)
