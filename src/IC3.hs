@@ -139,8 +139,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         ps       <- getAbsPreds
 
         r <- temp $ do
-            assert =<< mkAnd' =<< mapM (mkNot <=< mkAnd) f           -- Fn
-            assert =<< mkAnd  =<< T.sequence [ getTransL, getPropL ] -- T, not P'
+            assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f           -- Fn
+            assert =<< mkAnd =<< T.sequence [ getTransL, getPropL ] -- T, not P'
             getModel
 
         logMsg ("bad " ++ show (fst r))
@@ -175,8 +175,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                     ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
         block' cs@(c : _) rfs@(rf : _) lfs@(lf : lfs') = do
             r <- temp $ do
-                assert =<<                 mkAnd' =<<  mapM (mkNot <=< mkAnd)   lf  -- Fi
-                assert =<< mkAnd =<< mapM (mkAnd' <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi+1 ... Fn
+                assert =<<                 mkAnd =<<  mapM (mkNot <=< mkAnd)   lf  -- Fi
+                assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi+1 ... Fn
                 assert =<< mkNot =<< mkAnd c                                        -- not c
                 assert =<< getTransL                                                -- T
                 assert =<< next =<< mkAnd c                                         -- c'

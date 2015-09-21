@@ -5,8 +5,6 @@ module Logic ( time
              , getPreds
              , buildCube
              , expandCube
-             , mkAnd'
-             , mkOr'
              ) where
 
 import Control.Monad
@@ -119,11 +117,3 @@ expandLit exp l = expandLit' False l where
 
     expandAtom :: MonadZ3 z3 => AST -> z3 AST
     expandAtom = return . (Map.fromList exp Map.!)
-
-mkAnd' :: MonadZ3 z3 => [AST] -> z3 AST
-mkAnd' [] = mkTrue
-mkAnd' cs = mkAnd cs
-
-mkOr' :: MonadZ3 z3 => [AST] -> z3 AST
-mkOr' [] = mkFalse
-mkOr' ds = mkOr ds
