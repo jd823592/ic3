@@ -60,6 +60,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
 import Data.List
+import qualified Data.List.Zipper as Z
 import qualified Data.Traversable as T
 import qualified ListT as L
 
@@ -87,7 +88,7 @@ ic3 ts = ic3enum =<< lift env where
         predDefs <- fmap (map head . group . sort . concat) $ T.sequence $ map getPreds [i, t, p]
         predVars <- let n = length predDefs in T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
 
-        return $ E.Env ts [[]] (zip predVars predDefs)
+        return $ E.Env ts (Z.fromList [[]]) (zip predVars predDefs)
 
 -- Keep enumerating counterexamples
 ic3enum :: E.Env -> L.ListT Z3 Proof
@@ -150,39 +151,42 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     --   (a) the cex is real, it is returned,
     --   (b) otherwise the abstraction is refined.
     block :: E.Cube -> ProofBranch Counterexample ()
-    block c = do
-        (f : fs) <- getFrames
-        fs' <- block' [c] [f] fs
-        setFrames fs' where
+    block c = block' [c] where
+        block' :: E.Cubes -> ProofBranch Counterexample ()
+        block' cs@(c : _) = do
+            first <- isFirstFrame
 
-        block' :: [E.Cube] -> E.Frames -> E.Frames -> ProofBranch Counterexample E.Frames
-        block' cs@(c : _) (rf : rfs) [] = do
-            r <- temp $ do
-                assert =<< getInitL -- I
-                assert =<< mkAnd c  -- c
-                getModel
-            case r of
-                (Unsat, _)    -> return [ (c : rf) ]
-                (Sat, Just m) -> do
-                    exp <- getAbsPreds
-                    setFrames (reverse ((c : rf) : rfs))
-                    ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
-        block' cs@(c : _) rfs@(rf : _) lfs@(lf : lfs') = do
-            r <- temp $ do
-                assert =<<                 mkAnd =<<  mapM (mkNot <=< mkAnd)   lf  -- Fi-1
-                assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) rfs -- Fi ... Fn
-                assert =<< mkNot =<< mkAnd c                                       -- not c
-                assert =<< getTransL                                               -- T
-                assert =<< next =<< mkAnd c                                        -- c'
-                getModel
-            case r of
-                (Unsat, _) -> return ((c : rf) : lfs) -- blocked
-                (Sat, Just m) -> do
-                    ps <- getAbsPreds
-                    c' <- buildCube m (map fst ps)
-                    -- 1. block current predecessor (counterexample to induction) in lower frame
-                    -- 2. block any other predecessor
-                    block' (c' : cs) (lf : rfs) lfs' >>= block' cs rfs
+            if first
+            then do
+                r <- temp $ do
+                    assert =<< getInitL -- I
+                    assert =<< mkAnd c  -- c
+                    getModel
+                case r of
+                    (Unsat, _)    -> frameUpd (c :) -- blocked
+                    (Sat, Just m) -> do
+                        exp <- getAbsPreds
+                        frameUpd (c :)
+                        frameTop
+                        ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
+            else do
+                r <- temp $ do
+                    frameBwd
+                    assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) =<< getFramesUp -- Fi-1 ... Fn
+                    assert =<< mkNot =<< mkAnd c                                                   -- not c
+                    assert =<< getTransL                                                           -- T
+                    assert =<< next =<< mkAnd c                                                    -- c'
+                    frameFwd
+                    getModel
+                case r of
+                    (Unsat, _)    -> frameUpd (c :) -- blocked
+                    (Sat, Just m) -> do
+                        ps <- getAbsPreds
+                        c' <- buildCube m (map fst ps)
+                        frameBwd
+                        block' (c' : cs) -- 1. block current predecessor (counterexample to induction) in lower frame
+                        frameFwd
+                        block' cs        -- 2. block any other predecessor
 
     -- Propagate inductive blocked cubes to higher frames.
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
@@ -192,6 +196,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         exp             <- getAbsPreds
 
         setFrames fs
+
+        logMsg $ "Propagated: " ++ (show . map length . reverse $ fs)
 
         when (length f' == 0) $ ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) f  where
 
@@ -206,7 +212,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
 
             return (ic' : f'' : p)
 
-        collectInd :: E.Frame -> ([E.Cube], [E.Cube]) -> E.Cube -> ProofBranch Invariant ([E.Cube], [E.Cube])
+        collectInd :: E.Frame -> (E.Cubes, E.Cubes) -> E.Cube -> ProofBranch Invariant (E.Cubes, E.Cubes)
         collectInd f (ic, f') c = do
             r <- temp $ do
                 assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f
