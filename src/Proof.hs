@@ -78,6 +78,8 @@ class MonadZ3 m => MonadProofState m where
     setFrames    :: E.Frames -> m ()
     pushNewFrame :: m ()
     temp         :: m a -> m a
+    logMsg          :: String -> m ()
+    logMsg = liftIO . putStrLn
 
 newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT E.Env m a }
 

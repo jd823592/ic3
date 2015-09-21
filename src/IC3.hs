@@ -105,6 +105,8 @@ ic3core :: ProofBranch Proof a
 ic3core = init >> loop (bad >>= block <|> prop) where
     init :: ProofBranch Proof ()
     init = do
+        logMsg "init"
+
         i  <- getInit
         il <- getInitL
         t  <- getTrans
@@ -124,7 +126,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         mapM assert =<< mapM (uncurry mkIff) ps
 
         case r of
-            (Sat, Just m) -> ProofBranchT . throwE . Left . Counterexample . (:[]) =<< buildCube m (map fst ps)
+            (Sat, Just m) -> ProofBranchT . throwE . Left . Counterexample . return =<< buildCube m (map fst ps)
             (Unsat,    _) -> return ()
 
     loop :: Monad m => m a -> m b
@@ -135,11 +137,14 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     bad = do
         (f : fs) <- getFrames
         ps       <- getAbsPreds
+        false    <- T.sequence [ mkFalse ]
 
         r <- temp $ do
-            when (length fs == 0) $ assert =<< getInitL
-            assert =<< mkAnd =<< T.sequence [ getTransL, getPropL ]
+            assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) (false : f) -- Fn
+            assert =<< mkAnd =<< T.sequence [ getTransL, getPropL ] -- T, not P'
             getModel
+
+        logMsg ("bad " ++ show (fst r))
 
         case r of
             (Sat, Just m) -> fmap Just $ buildCube m (map fst ps)
@@ -151,15 +156,24 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     --   (b) otherwise the abstraction is refined.
     block :: E.Cube -> ProofBranch Counterexample ()
     block c = do
+        logMsg "block"
+
         (f : fs) <- getFrames
         fs' <- block' [c] [f] fs
         setFrames fs' where
 
         block' :: [E.Cube] -> E.Frames -> E.Frames -> ProofBranch Counterexample E.Frames
-        block' cs rfs [] = do
-            exp <- getAbsPreds
-            setFrames (reverse rfs)
-            ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
+        block' cs@(c : _) rfs@(rf : _) [] = do
+            r <- temp $ do
+                assert =<< getInitL -- I
+                assert =<< mkAnd c  -- c
+                getModel
+            case r of
+                (Unsat, _)    -> return [ (c : rf) ]
+                (Sat, Just m) -> do
+                    exp <- getAbsPreds
+                    setFrames (reverse rfs)
+                    ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
         block' cs@(c : _) rfs@(rf : _) lfs@(lf : lfs') = do
             r <- temp $ do
                 assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) lf                     -- Fi
@@ -170,6 +184,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 getModel
             case r of
                 (Unsat, _) -> do
+                    logMsg "blocked"
                     return (rf : (c : lf) : lfs') -- blocked
                 (Sat, Just m) -> do
                     ps <- getAbsPreds
@@ -182,6 +197,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
     prop :: ProofBranch Invariant ()
     prop = do
+        logMsg "prop"
+
         pushNewFrame
 
         -- TODO: propagate
