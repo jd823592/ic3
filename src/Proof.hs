@@ -21,12 +21,12 @@ data Invariant = Invariant E.Frame
 
 instance Reportable Counterexample where
     stringify (Counterexample cs) = do
-        syms  <- mapM (mapM stringifyLit) cs
+        syms  <- mapM (liftM (intercalate ",") . mapM stringifyLit) cs
         return $ "Counterexample " ++ show syms
 
 instance Reportable Invariant where
     stringify (Invariant f) = do
-        syms  <- mapM (mapM stringifyLit) f
+        syms  <- mapM (liftM (intercalate ",") . mapM stringifyLit) f
         return $ "Invariant " ++ show syms
 
 stringifyLit :: MonadZ3 m => AST -> m String
