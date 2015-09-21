@@ -134,8 +134,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- Find cube of states that may reach an error state in one step.
     bad :: ProofBranch Proof (Maybe E.Cube)
     bad = do
-        (f : fs) <- getFrames
-        ps       <- getAbsPreds
+        f  <- getFrame
+        ps <- getAbsPreds
 
         r <- temp $ do
             assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f           -- Fn
