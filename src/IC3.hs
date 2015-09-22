@@ -155,9 +155,9 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     block c = block' [c] where
         block' :: E.Cubes -> ProofBranch Counterexample ()
         block' cs@(c : _) = do
-            first <- isFirstFrame
+            bot <- isBotFrame
 
-            if first
+            if bot
             then do
                 r <- temp $ do
                     assert =<< getInitL -- I
@@ -193,33 +193,30 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
     prop :: ProofBranch Invariant ()
     prop = do
-        f  <- prop'
-        f' <- getFrame
-        pushFrame f
+        pushNewFrame
+        frameBot
+        prop' []
+        f' <- getPrevFrame
         when (length f' == 0) $ do
             exp <- getAbsPreds
-            ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) f  where
+            ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) =<< getFrame where
 
-        prop' :: ProofBranch Invariant E.Cubes
-        prop' = do
-            first <- isFirstFrame
-            ic    <- if first
-                then return []
-                else do
-                    frameBwd
-                    ic <- prop'
-                    frameFwd
-                    return ic
-
+        prop' :: E.Cubes -> ProofBranch Invariant E.Cubes
+        prop' ic = do
+            frameFwd
             frameUpd (nub . (ic ++))
 
-            f <- getFrame
+            top <- isTopFrame
 
-            (ic', f') <- partitionM (isInductive f) f
+            if top
+            then return []
+            else do
+                f <- getFrame
 
-            frameUpd (\_ -> f')
+                (ic', f') <- partitionM (isInductive f) f
 
-            return ic'
+                frameUpd (\_ -> f')
+                prop' ic'
 
         isInductive :: E.Frame -> E.Cube -> ProofBranch Invariant Bool
         isInductive f c = do

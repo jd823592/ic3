@@ -76,16 +76,19 @@ class MonadZ3 m => MonadProofState m where
     getProp      :: m T.Formula
     getPropL     :: m T.Formula
     getFrame     :: m E.Frame
+    getPrevFrame :: m E.Frame
     getFramesUp  :: m E.Frames
     getAbsPreds  :: m E.Predicates
-    pushFrame    :: E.Frame -> m ()
+    pushNewFrame :: m ()
     frameTop     :: m ()
+    frameBot     :: m ()
     frameFwd     :: m ()
     frameBwd     :: m ()
     frameUpd     :: (E.Frame -> E.Frame) -> m ()
-    isFirstFrame :: m Bool
+    isTopFrame   :: m Bool
+    isBotFrame   :: m Bool
     temp         :: m a -> m a
-    logMsg          :: String -> m ()
+    logMsg       :: String -> m ()
     logMsg = liftIO . putStrLn
 
 newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT E.Env m a }
@@ -115,14 +118,18 @@ instance MonadZ3 m => MonadProofState (ProofStateT m) where
     getProp      = ProofStateT $ fmap (T.getProp  . E.getTransitionSystem) get
     getPropL     = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "n"
     getFrame     = ProofStateT $ fmap (Z.cursor . E.getFrames) get
-    getFramesUp  = ProofStateT $ fmap ((\(Z.Zip ls (r : rs)) -> (r : ls)) . E.getFrames) get
+    getPrevFrame = ProofStateT $ fmap ((\(Z.Zip _  (_ : p : _)) -> p)        . E.getFrames) get
+    getFramesUp  = ProofStateT $ fmap ((\(Z.Zip ls (r : _))     -> (r : ls)) . E.getFrames) get
     getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
-    pushFrame f  = ProofStateT $ do
-        (E.Env ts fs a) <- get
-        put (E.Env ts (Z.insert f fs) a)
+    pushNewFrame = ProofStateT $ do
+        (E.Env ts f a) <- get
+        put (E.Env ts (Z.insert [] f) a)
     frameTop     = ProofStateT $ do
         (E.Env ts f a) <- get
         put (E.Env ts (Z.start f) a)
+    frameBot     = ProofStateT $ do
+        (E.Env ts f a) <- get
+        put (E.Env ts (Z.end f) a)
     frameFwd     = ProofStateT $ do
         (E.Env ts f a) <- get
         put (E.Env ts (Z.left f) a)
@@ -132,7 +139,8 @@ instance MonadZ3 m => MonadProofState (ProofStateT m) where
     frameUpd f   = ProofStateT $ do
         (E.Env ts fs a) <- get
         put (E.Env ts (Z.replace (f (Z.cursor fs)) fs) a)
-    isFirstFrame = ProofStateT $ return . (\(Z.Zip _ rs) -> length rs == 1) . E.getFrames =<< get
+    isTopFrame = ProofStateT $ return . (\(Z.Zip ls _) -> length ls == 0) . E.getFrames =<< get
+    isBotFrame = ProofStateT $ return . (\(Z.Zip _ rs) -> length rs == 1) . E.getFrames =<< get
     temp a       = push >> a >>= \r -> pop 1 >> return r
 
 instance MonadZ3 m => MonadZ3 (ProofStateT m) where
@@ -166,14 +174,17 @@ instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) wh
     getProp      = lift getProp
     getPropL     = lift getPropL
     getFrame     = lift getFrame
+    getPrevFrame = lift getPrevFrame
     getFramesUp  = lift getFramesUp
     getAbsPreds  = lift getAbsPreds
-    pushFrame f  = lift (pushFrame f)
+    pushNewFrame = lift pushNewFrame
     frameTop     = lift frameTop
+    frameBot     = lift frameBot
     frameFwd     = lift frameFwd
     frameBwd     = lift frameBwd
     frameUpd f   = lift (frameUpd f)
-    isFirstFrame = lift isFirstFrame
+    isTopFrame   = lift isTopFrame
+    isBotFrame   = lift isBotFrame
     temp         = ProofBranchT . ExceptT . temp . runExceptT . runProofBranchT
 
 instance MonadZ3 m => MonadZ3 (ProofBranchT a m) where
