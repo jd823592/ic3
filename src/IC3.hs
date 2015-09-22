@@ -175,8 +175,8 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 r <- isInductive c
                 frameFwd
                 case r of
-                    (Unsat, _)    -> frameUpd (c :) -- blocked
-                    (Sat, Left m) -> do
+                    (True, _) -> frameUpd (c :) -- blocked
+                    (False, Left m) -> do
                         ps <- getAbsPreds
                         c' <- buildCube m (map fst ps)
                         frameBwd
@@ -208,11 +208,11 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             if top
             then return []
             else do
-                (ic', f') <- partitionM (fmap ((== Unsat) . fst) . isInductive) =<< getFrame
+                (ic', f') <- partitionM (fmap fst . isInductive) =<< getFrame
                 frameUpd (\_ -> f')
                 prop' ic'
 
-    isInductive :: MonadProofState m => E.Cube -> m (Result, Either Model E.Cube)
+    isInductive :: MonadProofState m => E.Cube -> m (Bool, Either Model E.Cube)
     isInductive c = temp $ do
         assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) =<< getFramesUp -- Fi ... Fn
         assert =<< mkNot =<< mkAnd c                                                   -- not c
@@ -222,10 +222,10 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         case r of
             Sat -> do
                 (_, Just m) <- getModel
-                return (r, Left m)
+                return (False, Left m)
             Unsat -> do
                 k <- mapM untime =<< getUnsatCore
-                return (r, Right k)
+                return (True, Right k)
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
     (<|>) l _ (Just d) = mapL Left (l d)
