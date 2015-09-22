@@ -56,6 +56,7 @@
 module IC3 where
 
 import Control.Monad
+import Control.Monad.Extra
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.Except
 import Control.Monad.Trans.State
@@ -214,22 +215,20 @@ ic3core = init >> loop (bad >>= block <|> prop) where
 
             f <- getFrame
 
-            (ic', f') <- foldM (collectInd f) ([], []) f
+            (ic', f') <- partitionM (isInductive f) f
 
             frameUpd (\_ -> f')
 
             return ic'
 
-        collectInd :: E.Frame -> (E.Cubes, E.Cubes) -> E.Cube -> ProofBranch Invariant (E.Cubes, E.Cubes)
-        collectInd f (ic, f') c = do
+        isInductive :: E.Frame -> E.Cube -> ProofBranch Invariant Bool
+        isInductive f c = do
             r <- temp $ do
                 assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f
                 assert =<< getTransL
                 assert =<< next =<< mkNot =<< mkAnd c
                 check
-            case r of
-                Sat   -> return (    ic, c : f') -- not inductive
-                Unsat -> return (c : ic,     f') -- inductive
+            return (r == Unsat)
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
     (<|>) l _ (Just d) = mapL Left (l d)
