@@ -171,14 +171,9 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                         frameTop
                         ProofBranchT . throwE . Counterexample =<< mapM (expandCube exp) cs
             else do
-                r <- temp $ do
-                    frameBwd
-                    assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) =<< getFramesUp -- Fi-1 ... Fn
-                    assert =<< mkNot =<< mkAnd c                                                   -- not c
-                    assert =<< getTransL                                                           -- T
-                    assert =<< next =<< mkAnd c                                                    -- c'
-                    frameFwd
-                    getModel
+                frameBwd
+                r <- isInductive c
+                frameFwd
                 case r of
                     (Unsat, _)    -> frameUpd (c :) -- blocked
                     (Sat, Just m) -> do
@@ -196,7 +191,9 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         pushNewFrame
         frameBot
         prop' []
+
         f' <- getPrevFrame
+
         when (length f' == 0) $ do
             exp <- getAbsPreds
             ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) =<< getFrame where
@@ -211,21 +208,17 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             if top
             then return []
             else do
-                f <- getFrame
-
-                (ic', f') <- partitionM (isInductive f) f
-
+                (ic', f') <- partitionM (fmap ((== Unsat) . fst) . isInductive) =<< getFrame
                 frameUpd (\_ -> f')
                 prop' ic'
 
-        isInductive :: E.Frame -> E.Cube -> ProofBranch Invariant Bool
-        isInductive f c = do
-            r <- temp $ do
-                assert =<< mkAnd =<< mapM (mkNot <=< mkAnd) f
-                assert =<< getTransL
-                assert =<< next =<< mkNot =<< mkAnd c
-                check
-            return (r == Unsat)
+    isInductive :: MonadProofState m => E.Cube -> m (Result, Maybe Model)
+    isInductive c = temp $ do
+        assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) =<< getFramesUp -- Fi ... Fn
+        assert =<< mkNot =<< mkAnd c                                                   -- not c
+        assert =<< getTransL                                                           -- T
+        assert =<< next =<< mkAnd c                                                    -- c'
+        getModel
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
     (<|>) l _ (Just d) = mapL Left (l d)
