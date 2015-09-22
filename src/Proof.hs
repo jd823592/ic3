@@ -25,34 +25,29 @@ instance Reportable AST where
     stringify = stringify' False where
         stringify' :: MonadZ3 m => Bool -> AST -> m String
         stringify' neg l = do
-            app <- toApp l
-            sym <- getSymbolString =<< getDeclName =<< getAppDecl app
-            case sym of
-                "not" -> stringify' True =<< getAppArg app 0
-                "=" -> do
-                    [x, y] <- mapM stringifyTerm =<< getAppArgs app
-                    return . concat $ [x, if neg then " /= " else " = ", y]
-                "<" -> do
-                    [x, y] <- mapM stringifyTerm =<< getAppArgs app
-                    return . concat $ [x, if neg then " >= " else " < ", y]
-                otherwise -> return $ (if neg then "not " else "") ++ sym
-
-        stringifyTerm :: MonadZ3 m => AST -> m String
-        stringifyTerm t = do
-            k    <- getAstKind t
-            app  <- toApp t
+            k    <- getAstKind l
+            app  <- toApp l
             decl <- getAppDecl app
             sym  <- getSymbolString =<< getDeclName decl
             n    <- getAppNumArgs app
             case k of
-                Z3_NUMERAL_AST -> fmap show $ getInt t
+                Z3_NUMERAL_AST -> fmap show $ getInt l
                 otherwise      -> do
-                    args <- mapM stringifyTerm =<< getAppArgs app
-                    if sym `elem` ["+", "-", "*", "/"]
-                    then return $ intercalate (" " ++ sym ++ " ") args
-                    else if n > 0
-                    then return $ sym ++  "(" ++ intercalate (", ") args ++ ")"
-                    else return sym
+                    case sym of
+                        "not" -> stringify' (not neg) =<< getAppArg app 0
+                        "=" -> do
+                            [x, y] <- mapM stringify =<< getAppArgs app
+                            return . concat $ [x, if neg then " /= " else " = ", y]
+                        "<" -> do
+                            [x, y] <- mapM stringify =<< getAppArgs app
+                            return . concat $ [x, if neg then " >= " else " < ", y]
+                        otherwise -> do
+                            args <- mapM stringify =<< getAppArgs app
+                            if sym `elem` ["+", "-", "*", "/"]
+                            then return $ intercalate (" " ++ sym ++ " ") args
+                            else if n > 0
+                            then return $ sym ++  "(" ++ intercalate (", ") args ++ ")"
+                            else return $ (if neg then "not " else "") ++ sym
 
 instance Reportable Counterexample where
     stringify (Counterexample cs) = do
