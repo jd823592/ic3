@@ -224,7 +224,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 (_, Just m) <- getModel
                 return (r, Left m)
             Unsat -> do
-                k <- getUnsatCore
+                k <- mapM untime =<< getUnsatCore
                 return (r, Right k)
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
