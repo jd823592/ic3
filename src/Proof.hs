@@ -76,10 +76,9 @@ class MonadZ3 m => MonadProofState m where
     getProp      :: m T.Formula
     getPropL     :: m T.Formula
     getFrame     :: m E.Frame
-    getFrames    :: m E.Frames
     getFramesUp  :: m E.Frames
     getAbsPreds  :: m E.Predicates
-    setFrames    :: E.Frames -> m ()
+    pushFrame    :: E.Frame -> m ()
     frameTop     :: m ()
     frameFwd     :: m ()
     frameBwd     :: m ()
@@ -116,12 +115,11 @@ instance MonadZ3 m => MonadProofState (ProofStateT m) where
     getProp      = ProofStateT $ fmap (T.getProp  . E.getTransitionSystem) get
     getPropL     = ProofStateT . lift $ mkBoolVar =<< mkStringSymbol "n"
     getFrame     = ProofStateT $ fmap (Z.cursor . E.getFrames) get
-    getFrames    = ProofStateT $ fmap (Z.toList . E.getFrames) get
     getFramesUp  = ProofStateT $ fmap ((\(Z.Zip ls (r : rs)) -> (r : ls)) . E.getFrames) get
     getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
-    setFrames f  = ProofStateT $ do
-        (E.Env ts _ a) <- get
-        put (E.Env ts (Z.fromList f) a)
+    pushFrame f  = ProofStateT $ do
+        (E.Env ts fs a) <- get
+        put (E.Env ts (Z.insert f fs) a)
     frameTop     = ProofStateT $ do
         (E.Env ts f a) <- get
         put (E.Env ts (Z.start f) a)
@@ -168,10 +166,9 @@ instance (MonadZ3 m, MonadProofState m) => MonadProofState (ProofBranchT a m) wh
     getProp      = lift getProp
     getPropL     = lift getPropL
     getFrame     = lift getFrame
-    getFrames    = lift getFrames
     getFramesUp  = lift getFramesUp
     getAbsPreds  = lift getAbsPreds
-    setFrames f  = lift (setFrames f)
+    pushFrame f  = lift (pushFrame f)
     frameTop     = lift frameTop
     frameFwd     = lift frameFwd
     frameBwd     = lift frameBwd

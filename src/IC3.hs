@@ -85,7 +85,7 @@ ic3 ts = ic3enum =<< lift env where
 
         -- Extract unique predicates from i, t, and p.
         -- Allocate a new variable for each.
-        predDefs <- fmap (map head . group . sort . concat) $ T.sequence $ map getPreds [i, t, p]
+        predDefs <- fmap (nub . concat) $ T.sequence $ map getPreds [i, t, p]
         predVars <- let n = length predDefs in T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
 
         return $ E.Env ts (Z.fromList [[]]) (zip predVars predDefs)
@@ -192,25 +192,33 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- When two consecutive frames are equal, we have reached a safe fixpoint and can stop.
     prop :: ProofBranch Invariant ()
     prop = do
-        fs@(f : f' : _) <- prop' =<< getFrames
-        exp             <- getAbsPreds
+        f  <- prop'
+        f' <- getFrame
+        pushFrame f
+        when (length f' == 0) $ do
+            exp <- getAbsPreds
+            ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) f  where
 
-        setFrames fs
+        prop' :: ProofBranch Invariant E.Cubes
+        prop' = do
+            first <- isFirstFrame
+            ic    <- if first
+                then return []
+                else do
+                    frameBwd
+                    ic <- prop'
+                    frameFwd
+                    return ic
 
-        logMsg $ "Propagated: " ++ (show . map length . reverse $ fs)
+            frameUpd (nub . (ic ++))
 
-        when (length f' == 0) $ ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) f  where
+            f <- getFrame
 
-        prop' :: E.Frames -> ProofBranch Invariant E.Frames
-        prop' []       = return [[]]
-        prop' (f : fs) = do
-            (ic : p) <- prop' fs
+            (ic', f') <- foldM (collectInd f) ([], []) f
 
-            let f' = (map head . group . sort) (ic ++ f)
+            frameUpd (\_ -> f')
 
-            (ic', f'') <- foldM (collectInd f') ([], []) f'
-
-            return (ic' : f'' : p)
+            return ic'
 
         collectInd :: E.Frame -> (E.Cubes, E.Cubes) -> E.Cube -> ProofBranch Invariant (E.Cubes, E.Cubes)
         collectInd f (ic, f') c = do
