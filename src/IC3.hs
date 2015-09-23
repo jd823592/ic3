@@ -161,11 +161,10 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             then do
                 r <- temp $ do
                     assert =<< getInitL -- I
-                    assert =<< mkAnd c  -- c
-                    getModel
+                    checkCube c         -- c
                 case r of
-                    (Unsat, _)    -> frameUpd (c :) -- blocked
-                    (Sat, Just m) -> do
+                    (Unsat, Right k) -> frameUpd (k :) -- blocked
+                    (Sat,    Left _) -> do
                         exp <- getAbsPreds
                         frameUpd (c :)
                         frameTop
@@ -176,9 +175,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 frameFwd
                 case r of
                     (True, _) -> frameUpd (c :) -- blocked
-                    (False, Left m) -> do
-                        ps <- getAbsPreds
-                        c' <- buildCube m (map fst ps)
+                    (False, Left c') -> do
                         frameBwd
                         block' (c' : cs) -- 1. block current predecessor (counterexample to induction) in lower frame
                         frameFwd
@@ -212,20 +209,29 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 frameUpd (\_ -> f')
                 prop' ic'
 
-    isInductive :: MonadProofState m => E.Cube -> m (Bool, Either Model E.Cube)
+    isInductive :: MonadProofState m => E.Cube -> m (Bool, Either E.Cube E.Cube)
     isInductive c = temp $ do
+        c' <- mapM next c
+
         assert =<< mkAnd =<< mapM (mkAnd <=< (mapM (mkNot <=< mkAnd))) =<< getFramesUp -- Fi ... Fn
         assert =<< mkNot =<< mkAnd c                                                   -- not c
         assert =<< getTransL                                                           -- T
-        r <- checkAssumptions =<< mapM next c                                          -- c'
+        (r, w) <- checkCube c'                                                         -- c'
+
+        return (r == Unsat, w)
+
+    checkCube :: MonadProofState m => E.Cube -> m (Result, Either E.Cube E.Cube)
+    checkCube c = do
+        r <- checkAssumptions c
 
         case r of
             Sat -> do
                 (_, Just m) <- getModel
-                return (False, Left m)
+                k <- buildCube m =<< fmap (map fst) getAbsPreds
+                return (r, Left k)
             Unsat -> do
                 k <- mapM untime =<< getUnsatCore
-                return (True, Right k)
+                return (r, Right k)
 
     (<|>) :: (d -> ProofBranch a c) -> ProofBranch b c -> Maybe d -> ProofBranch (Either a b) c
     (<|>) l _ (Just d) = mapL Left (l d)
