@@ -86,7 +86,7 @@ ic3 ts = ic3enum =<< lift env where
 
         -- Extract unique predicates from i, t, and p.
         -- Allocate a new variable for each.
-        predDefs <- fmap (nub . concat) $ T.sequence $ map getPreds [i, t, p]
+        predDefs <- fmap (nub . concat) $ T.sequence $ map getStatePreds [i, t, p]
         predVars <- let n = length predDefs in T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
 
         return $ E.Env ts (Z.fromList [[]]) (zip predVars predDefs)
@@ -124,6 +124,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         assert =<< mkImplies tl t
         assert =<< mkImplies nl =<< mkNot =<< next p
         mapM assert =<< mapM (uncurry mkIff) ps
+        mapM assert =<< mapM (next <=< uncurry mkIff) ps
 
         case r of
             (Sat, Just m) -> ProofBranchT . throwE . Left . Counterexample . return =<< buildCube m (map fst ps)

@@ -2,12 +2,13 @@ module Logic ( time
              , untime
              , next
              , prev
-             , getPreds
+             , getStatePreds
              , buildCube
              , expandCube
              ) where
 
 import Control.Monad
+import Data.List
 import Data.List.Split
 import qualified Data.Map as Map
 import Debug.Trace
@@ -72,20 +73,44 @@ getTimedSymbol s = do
 timeSymbol :: MonadZ3 z3 => Int -> String -> z3 Symbol
 timeSymbol t s = mkStringSymbol $ s ++ '@' : show t
 
-getPreds :: MonadZ3 z3 => AST -> z3 [AST]
-getPreds a = do
-    k <- getAstKind a
-    case k of
-        Z3_APP_AST -> do
-            app  <- toApp a
-            decl <- getAppDecl app
-            sym  <- getSymbolString =<< getDeclName decl
+getStatePreds :: MonadZ3 z3 => AST -> z3 [AST]
+getStatePreds = getStatePreds' [] where
+    getStatePreds' :: MonadZ3 z3 => [AST] -> AST -> z3 [AST]
+    getStatePreds' preds a = do
+        k <- getAstKind a
+        case k of
+            Z3_APP_AST -> do
+                app  <- toApp a
+                decl <- getAppDecl app
+                sym  <- getSymbolString =<< getDeclName decl
 
-            if sym `elem` ["=", "<"]
-            then mapM untime [a]
-            else fmap concat $ mapM getPreds =<< getAppArgs app
+                if sym `elem` ["=", "<"]
+                then do
+                    vars  <- getVars a
+                    syms  <- mapM (getDeclName <=< getAppDecl <=< toApp) vars
+                    times <- fmap (length . nub . map snd) $ mapM getTimedSymbol syms
 
-        otherwise -> return []
+                    if times == 1
+                    then return . (: preds) =<< untime a
+                    else return preds
+                else foldM getStatePreds' preds =<< getAppArgs app
+            otherwise -> return []
+
+getVars :: MonadZ3 z3 => AST -> z3 [AST]
+getVars = getVars' [] where
+    getVars' :: MonadZ3 z3 => [AST] -> AST -> z3 [AST]
+    getVars' vars a = do
+        k <- getAstKind a
+        case k of
+            Z3_APP_AST -> do
+                app  <- toApp a
+                decl <- getAppDecl app
+                args <- getAppNumArgs app
+
+                if args == 0
+                then return (a : vars)
+                else foldM getVars' vars =<< (getAppArgs app)
+            otherwise -> return vars
 
 buildCube :: MonadZ3 z3 => Model -> [AST] -> z3 [AST]
 buildCube m = foldr buildCube' (return []) where
