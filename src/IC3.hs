@@ -123,8 +123,11 @@ ic3core = init >> loop (bad >>= block <|> prop) where
         assert =<< mkImplies il i
         assert =<< mkImplies tl t
         assert =<< mkImplies nl =<< mkNot =<< next p
-        mapM assert =<< mapM (uncurry mkIff) ps
-        mapM assert =<< mapM (next <=< uncurry mkIff) ps
+
+        eq <- mapM (uncurry mkIff) ps
+
+        mapM  assert           eq
+        mapM (assert <=< next) eq
 
         case r of
             (Sat, Just m) -> ProofBranchT . throwE . Left . Counterexample . return =<< buildCube m (map fst ps)
