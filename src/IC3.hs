@@ -100,7 +100,13 @@ ic3enum env = do
         inv@(Right _) -> return inv
 
 runic3 :: Env -> ProofBranch Proof Proof -> L.ListT Z3 (Proof, Env)
-runic3 env = lift . (`runStateT` env) . runProofStateT . fmap (either id id) . runExceptT . runProofBranchT . temp
+runic3 env = lift
+           . (`runStateT` env)
+           . runProofStateT
+           . fmap (either id id)
+           . runExceptT
+           . runProofBranchT
+           . temp
 
 -- IC3
 ic3core :: ProofBranch Proof a
