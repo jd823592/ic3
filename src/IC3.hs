@@ -69,7 +69,7 @@ import Z3.Monad
 
 import Logic
 import Proof
-import qualified Environment as E
+import Environment (Env(Env), Cube, Cubes)
 import qualified TransitionSystem as TS
 
 -- IC3
@@ -78,7 +78,7 @@ import qualified TransitionSystem as TS
 -- or an invariant as a certificate of safety of the system.
 ic3 :: TS.TransitionSystem -> L.ListT Z3 Proof
 ic3 ts = ic3enum =<< lift env where
-    env :: Z3 E.Env
+    env :: Z3 Env
     env = do
         let i = TS.getInit  ts
             t = TS.getTrans ts
@@ -89,17 +89,17 @@ ic3 ts = ic3enum =<< lift env where
         predDefs <- fmap (nub . concat) $ T.sequence $ map getStatePreds [i, t, p]
         predVars <- let n = length predDefs in T.sequence $ map (\i -> mkBoolVar =<< mkStringSymbol ('p' : '!' : show i)) [0 .. n - 1]
 
-        return $ E.Env ts (Z.fromList [[]]) (zip predVars predDefs)
+        return $ Env ts (Z.fromList [[]]) (zip predVars predDefs)
 
 -- Keep enumerating counterexamples
-ic3enum :: E.Env -> L.ListT Z3 Proof
+ic3enum :: Env -> L.ListT Z3 Proof
 ic3enum env = do
     (p, env') <- runic3 env ic3core
     case p of
         cex@(Left  _) -> L.cons cex (ic3enum env')
         inv@(Right _) -> return inv
 
-runic3 :: E.Env -> ProofBranch Proof Proof -> L.ListT Z3 (Proof, E.Env)
+runic3 :: Env -> ProofBranch Proof Proof -> L.ListT Z3 (Proof, Env)
 runic3 env = lift . (`runStateT` env) . runProofStateT . fmap (either id id) . runExceptT . runProofBranchT
 
 -- IC3
@@ -137,7 +137,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     loop = forever
 
     -- Find cube of states that may reach an error state in one step.
-    bad :: ProofBranch Proof (Maybe E.Cube)
+    bad :: ProofBranch Proof (Maybe Cube)
     bad = do
         f  <- getFrame
         ps <- getAbsPreds
@@ -155,9 +155,9 @@ ic3core = init >> loop (bad >>= block <|> prop) where
     -- If blocking fails due to reaching F0 with a proof obligation, if
     --   (a) the cex is real, it is returned,
     --   (b) otherwise the abstraction is refined.
-    block :: E.Cube -> ProofBranch Counterexample ()
+    block :: Cube -> ProofBranch Counterexample ()
     block c = block' [c] where
-        block' :: E.Cubes -> ProofBranch Counterexample ()
+        block' :: Cubes -> ProofBranch Counterexample ()
         block' cs@(c : _) = do
             bot <- isBotFrame
 
@@ -199,7 +199,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             exp <- getAbsPreds
             ProofBranchT . throwE . Invariant =<< mapM (expandCube exp) =<< getFrame where
 
-        prop' :: E.Cubes -> ProofBranch Invariant E.Cubes
+        prop' :: Cubes -> ProofBranch Invariant Cubes
         prop' ic = do
             frameFwd
             frameUpd (nub . (ic ++))
@@ -213,7 +213,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
                 frameUpd (\_ -> f')
                 prop' ic'
 
-    isInductive :: MonadProofState m => E.Cube -> m (Bool, Either E.Cube E.Cube)
+    isInductive :: MonadProofState m => Cube -> m (Bool, Either Cube Cube)
     isInductive c = temp $ do
         c' <- mapM next c
 
@@ -224,7 +224,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
 
         return (r == Unsat, w)
 
-    checkCube :: MonadProofState m => E.Cube -> m (Result, Either E.Cube E.Cube)
+    checkCube :: MonadProofState m => Cube -> m (Result, Either Cube Cube)
     checkCube c = do
         r <- checkAssumptions c
 

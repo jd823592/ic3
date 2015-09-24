@@ -11,82 +11,59 @@ import Z3.Monad
 
 import qualified Data.List.Zipper as Z
 
+import Environment (Env(Env), Cube, Cubes, Frame, Frames, Predicate, Predicates)
+import TransitionSystem (Formula)
 import qualified Environment as E
 import qualified Logic as L
 import qualified TransitionSystem as T
 
-class Reportable c where
-    stringify :: MonadZ3 m => c -> m String
+class Reportable r where
+    stringify :: MonadZ3 m => r -> m String
 
-data Counterexample = Counterexample E.Cubes
-data Invariant = Invariant E.Frame
+data Counterexample = Counterexample Cubes
+data Invariant = Invariant Frame
 
 instance Reportable AST where
-    stringify = stringify' False where
-        stringify' :: MonadZ3 m => Bool -> AST -> m String
-        stringify' neg l = do
-            k    <- getAstKind l
-            app  <- toApp l
-            decl <- getAppDecl app
-            sym  <- getSymbolString =<< getDeclName decl
-            n    <- getAppNumArgs app
-            case k of
-                Z3_NUMERAL_AST -> fmap show $ getInt l
-                otherwise      -> do
-                    case sym of
-                        "not" -> stringify' (not neg) =<< getAppArg app 0
-                        "=" -> do
-                            [x, y] <- mapM stringify =<< getAppArgs app
-                            return . concat $ [x, if neg then " /= " else " = ", y]
-                        "<" -> do
-                            [x, y] <- mapM stringify =<< getAppArgs app
-                            return . concat $ [x, if neg then " >= " else " < ", y]
-                        otherwise -> do
-                            args <- mapM stringify =<< getAppArgs app
-                            if sym `elem` ["+", "-", "*", "/"]
-                            then return $ intercalate (" " ++ sym ++ " ") args
-                            else if n > 0
-                            then return $ sym ++  "(" ++ intercalate (", ") args ++ ")"
-                            else return $ (if neg then "not " else "") ++ sym
+    stringify = astToString
 
 instance Reportable Counterexample where
     stringify (Counterexample cs) = do
-        syms  <- mapM (liftM (intercalate ",") . mapM stringify) cs
-        return $ "Counterexample " ++ show syms
+        syms <- fmap (intercalate "]; [") (mapM (liftM (intercalate ", ") . mapM stringify) cs)
+        return $ "Counterexample [" ++ syms ++ "]"
 
 instance Reportable Invariant where
     stringify (Invariant f) = do
-        syms  <- mapM (liftM (intercalate ",") . mapM stringify) f
-        return $ "Invariant " ++ show syms
+        syms <- fmap (intercalate "]; [") (mapM (liftM (intercalate ", ") . mapM stringify) f)
+        return $ "Invariant [" ++ syms ++ "]"
 
 type Proof         = Either Counterexample Invariant
 type ProofState    = ProofStateT Z3
 type ProofBranch a = ProofBranchT a ProofState
 
 class MonadZ3 m => MonadProofState m where
-    getInit      :: m T.Formula
-    getInitL     :: m T.Formula
-    getTrans     :: m T.Formula
-    getTransL    :: m T.Formula
-    getProp      :: m T.Formula
-    getPropL     :: m T.Formula
-    getFrame     :: m E.Frame
-    getPrevFrame :: m E.Frame
-    getFramesUp  :: m E.Frames
-    getAbsPreds  :: m E.Predicates
+    getInit      :: m Formula
+    getInitL     :: m Formula
+    getTrans     :: m Formula
+    getTransL    :: m Formula
+    getProp      :: m Formula
+    getPropL     :: m Formula
+    getFrame     :: m Frame
+    getPrevFrame :: m Frame
+    getFramesUp  :: m Frames
+    getAbsPreds  :: m Predicates
     pushNewFrame :: m ()
     frameTop     :: m ()
     frameBot     :: m ()
     frameFwd     :: m ()
     frameBwd     :: m ()
-    frameUpd     :: (E.Frame -> E.Frame) -> m ()
+    frameUpd     :: (Frame -> Frame) -> m ()
     isTopFrame   :: m Bool
     isBotFrame   :: m Bool
     temp         :: m a -> m a
     logMsg       :: String -> m ()
     logMsg = liftIO . putStrLn
 
-newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT E.Env m a }
+newtype ProofStateT m a = ProofStateT { runProofStateT :: StateT Env m a }
 
 instance MonadTrans ProofStateT where
     lift = ProofStateT . lift
@@ -117,23 +94,23 @@ instance MonadZ3 m => MonadProofState (ProofStateT m) where
     getFramesUp  = ProofStateT $ fmap ((\(Z.Zip ls (r : _))     -> (r : ls)) . E.getFrames) get
     getAbsPreds  = ProofStateT $ fmap E.getAbsPreds get
     pushNewFrame = ProofStateT $ do
-        (E.Env ts f a) <- get
-        put (E.Env ts (Z.insert [] f) a)
+        (Env ts f a) <- get
+        put (Env ts (Z.insert [] f) a)
     frameTop     = ProofStateT $ do
-        (E.Env ts f a) <- get
-        put (E.Env ts (Z.start f) a)
+        (Env ts f a) <- get
+        put (Env ts (Z.start f) a)
     frameBot     = ProofStateT $ do
-        (E.Env ts f a) <- get
-        put (E.Env ts (Z.end f) a)
+        (Env ts f a) <- get
+        put (Env ts (Z.end f) a)
     frameFwd     = ProofStateT $ do
-        (E.Env ts f a) <- get
-        put (E.Env ts (Z.left f) a)
+        (Env ts f a) <- get
+        put (Env ts (Z.left f) a)
     frameBwd     = ProofStateT $ do
-        (E.Env ts f a) <- get
-        put (E.Env ts (Z.right f) a)
+        (Env ts f a) <- get
+        put (Env ts (Z.right f) a)
     frameUpd f   = ProofStateT $ do
-        (E.Env ts fs a) <- get
-        put (E.Env ts (Z.replace (f (Z.cursor fs)) fs) a)
+        (Env ts fs a) <- get
+        put (Env ts (Z.replace (f (Z.cursor fs)) fs) a)
     isTopFrame = ProofStateT $ return . (\(Z.Zip ls _) -> length ls == 0) . E.getFrames =<< get
     isBotFrame = ProofStateT $ return . (\(Z.Zip _ rs) -> length rs == 1) . E.getFrames =<< get
     temp a       = push >> a >>= \r -> pop 1 >> return r
