@@ -216,7 +216,7 @@ ic3core = init >> loop (bad >>= block <|> prop) where
             then return []
             else do
                 (ic', f') <- partitionM (fmap fst . isInductive) =<< getFrame
-                frameUpd (\_ -> f')
+                frameUpd (const f')
                 prop' ic'
 
     isInductive :: MonadProofState m => Cube -> m (Bool, Either Cube Cube)
